@@ -1,0 +1,64 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses semantic versioning.
+
+## [0.2.0] - 2026-10-01
+
+A review of the March release found several defects that produced wrong numbers silently. All of them
+are fixed and each has a regression test (`tests/test_core.py`). Anyone who processed data with 0.1.0
+should re-run it; the cases below say when the old output was affected.
+
+### Fixed (results)
+- Calibration images between the first and the last were listed but never used; coefficients are now
+  interpolated piecewise-linearly through every fitted calibration image. *(affected: flights with three or
+  more calibration shots)*
+- The optional emissivity correction was applied to survey pixels but not to the target readings the fit
+  was based on, shifting all outputs by about +2 to +3 °C. The correction is now applied consistently
+  (panel emissivity before the fit, scene emissivity on survey pixels) and is off by default. *(affected:
+  runs with emissivity correction enabled)*
+- Colour JPEG previews (DJI `*_T.JPG`) were accepted and their palette values treated as temperatures. Multi-
+  band images are now refused; 8-bit images produce a warning. *(affected: batches that contained the
+  previews next to the temperature TIFFs)*
+- A reference value of `0.0` or one typed with a comma (`15,0`) was silently ignored. *(affected: ice-bath
+  references, comma-decimal locales)*
+- Switching the multispectral method recomputed only the current calibration image and deleted extra
+  targets without asking.
+- The "inner 80 %" region of interest shrank the polygon by well under a pixel on small targets, so the
+  blurred edge entered the mean (about 1 to 3 °C bias at typical target sizes). The ROI is now eroded by a
+  fixed number of pixels (default 3) and the region used is drawn on the image.
+- The processing summary was written in the locale encoding and crashed on Windows when the emissivity
+  correction was enabled.
+- Starting a polygon on one image and finishing it on another produced a polygon from both.
+- Output GeoTIFFs lost all EXIF/XMP/GPS metadata; with exiftool on the PATH the full block is now copied,
+  and GDAL tags are always carried over.
+- Switching between calibration shots could take seconds and left the target table blank meanwhile: the
+  table and the fit panel rebuilt their widgets on every switch, which Tk lays out slowly. Widgets are now
+  reused, residual bars are drawn on one canvas and loaded images are cached (about 0.1 s per switch).
+
+### Added
+- Fit diagnostics: residuals, RMSE, standard errors of m and b, leave-one-out error, ±1σ prediction band,
+  extrapolation warning; HTML fit report export.
+- Per-image prediction uncertainty of the fit (`u_fit_1sigma`) and the image's position relative to the
+  calibration shots in the processing log.
+- Capture-time source (XMP/EXIF/TIFF tag/file date) recorded per image and checked before processing.
+- Pre-flight check listing file types, time sources, images outside the calibration window and overwrites;
+  it runs by itself when the survey folder is chosen, and every image is listed before processing.
+- Zoom, pan, loupe, cursor readout and colour bar on the image view.
+- Four-step layout (Images, Targets, Fit, Process) with a flight timeline, a live fit panel and an editable
+  project title. Targets are shared by all calibration shots.
+- Batch processing in a worker thread with Cancel and a live results table.
+- Project files (`*.calib.json`) and a headless command line (`--project FILE --run`); every run saves the
+  project next to its outputs.
+- Test suite (137 tests), golden regression data, continuous integration, GPL-3.0 license, citation file.
+
+### Changed
+- Minimum supported Python is 3.9; `piexif` is optional.
+- The processing log gained columns (`timestamp_source`, `timestamp_tz`, `position_vs_calibration`,
+  `pct_pixels_outside_target_range`, `u_fit_1sigma`). The column list is pinned by a test.
+- Survey images are given as a folder (plus an optional filename filter), no longer as a file list.
+
+## [0.1.0] - 2026-03-06
+
+First public release: thermal and single-band multispectral calibration with up to two calibration
+images, Tk GUI, CSV processing log.
