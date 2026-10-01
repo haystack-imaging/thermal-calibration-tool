@@ -1,0 +1,99 @@
+{
+  "events": [
+    {
+      "file": "cal_0.tif",
+      "slope": 1.058936677506926,
+      "intercept": -1.448719069822907,
+      "r2": 0.9993281810029955,
+      "rmse": 0.2446550362671434,
+      "se_slope": 0.027456303296365888,
+      "se_intercept": 0.8405650608913465,
+      "loo": 0.9000279175007762
+    },
+    {
+      "file": "cal_1.tif",
+      "slope": 1.0879434916707726,
+      "intercept": -3.3403783057935037,
+      "r2": 0.9999700214733465,
+      "rmse": 0.0525416272218235,
+      "se_slope": 0.005956868195097687,
+      "se_intercept": 0.1868061539444852,
+      "loo": 0.19329083632899205
+    },
+    {
+      "file": "cal_2.tif",
+      "slope": 1.0715417983863014,
+      "intercept": -3.974897502113169,
+      "r2": 0.9999989020414669,
+      "rmse": 0.009797616780870507,
+      "se_slope": 0.0011227997935519581,
+      "se_intercept": 0.036048956932598894,
+      "loo": 0.03604342047227284
+    }
+  ],
+  "rows": [
+    {
+      "input_filename": "survey_0.tif",
+      "slope_m": 1.06308051,
+      "intercept_b": -1.718956,
+      "calibrated_mean_celsius": 33.8324,
+      "u_fit_1sigma": 0.5024,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    },
+    {
+      "input_filename": "survey_1.tif",
+      "slope_m": 1.0730257,
+      "intercept_b": -2.367525,
+      "calibrated_mean_celsius": 33.6417,
+      "u_fit_1sigma": 0.5032,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    },
+    {
+      "input_filename": "survey_2.tif",
+      "slope_m": 1.08297089,
+      "intercept_b": -3.016094,
+      "calibrated_mean_celsius": 33.8102,
+      "u_fit_1sigma": 0.5062,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    },
+    {
+      "input_filename": "survey_3.tif",
+      "slope_m": 1.08513177,
+      "intercept_b": -3.449153,
+      "calibrated_mean_celsius": 33.9298,
+      "u_fit_1sigma": 0.1082,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    },
+    {
+      "input_filename": "survey_4.tif",
+      "slope_m": 1.07950834,
+      "intercept_b": -3.666702,
+      "calibrated_mean_celsius": 33.6458,
+      "u_fit_1sigma": 0.1084,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    },
+    {
+      "input_filename": "survey_5.tif",
+      "slope_m": 1.0738849,
+      "intercept_b": -3.884252,
+      "calibrated_mean_celsius": 33.2453,
+      "u_fit_1sigma": 0.1084,
+      "pct_pixels_outside_target_range": 0.0,
+      "position_vs_calibration": "between"
+    }
+  ],
+  "survey_mean_errors": [
+    0.2914085388183594,
+    0.2624320983886719,
+    0.22370529174804688,
+    0.14191818237304688,
+    0.021869659423828125,
+    -0.09886932373046875
+  ],
+  "tool_version": "0.2.0"
+}
