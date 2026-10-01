@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "thermal-calibration-tool"
+version = "0.2.0"
+description = "GUI to correct thermal (and single-band multispectral) drone images with the Empirical Line Method using field calibration targets"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Moritz Nelle" }]
+requires-python = ">=3.9"
+keywords = ["thermal imaging", "UAV", "drone", "radiometric calibration", "empirical line method", "phenotyping"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Repository = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
+Issues = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/issues"
+Changelog = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/blob/main/CHANGELOG.md"
+dependencies = [
+    "numpy>=1.20",
+    "pandas>=1.3",
+    "Pillow>=9.0",
+    "opencv-python>=4.5",
+    "rasterio>=1.2",
+    "scipy>=1.7",
+    "matplotlib>=3.5",
+]
+
+[project.optional-dependencies]
+exif = ["piexif>=1.1.3"]
+test = ["pytest>=7"]
+
+[project.scripts]
+thermal-calibration-tool = "thermal_calibration_tool:main"
+
+[tool.setuptools]
+py-modules = ["thermal_calibration_tool"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

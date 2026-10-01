@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it as below."
+type: software
+title: "Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets"
+version: 0.2.0
+date-released: 2026-10-01
+authors:
+  - family-names: Nelle
+    given-names: Moritz
+license: GPL-3.0-only
+repository-code: "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
+keywords:
+  - thermal imaging
+  - UAV
+  - drone
+  - radiometric calibration
+  - empirical line method
+  - microbolometer drift
+  - plant phenotyping
+abstract: >-
+  Desktop tool that corrects the drift and offset of uncooled thermal drone cameras using reference
+  targets measured in the field. Fits the Empirical Line Method per calibration image, interpolates
+  the correction over the flight, writes 32-bit float GeoTIFFs with their metadata, and reports a
+  per-image uncertainty budget.
