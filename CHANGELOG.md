@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses semantic versioning.
 
-## [0.2.0] - 2026-10-01
+## [0.2.0] - 2026-10-10
 
 A review of the March release found several defects that produced wrong numbers silently. All of them
 are fixed and each has a regression test (`tests/test_core.py`). Anyone who processed data with 0.1.0
@@ -35,6 +35,15 @@ should re-run it; the cases below say when the old output was affected.
 - Switching between calibration shots could take seconds and left the target table blank meanwhile: the
   table and the fit panel rebuilt their widgets on every switch, which Tk lays out slowly. Widgets are now
   reused, residual bars are drawn on one canvas and loaded images are cached (about 0.1 s per switch).
+- From the pre-release review: a target whose polygon fell outside the image (or over NaN pixels) counted
+  as complete and produced an all-NaN fit and all-NaN outputs marked "ok"; such targets are now incomplete
+  and non-finite fits are blocked. A source nodata value was calibrated as a temperature; it is now NaN, and
+  outputs declare NaN as nodata. The per-image prediction uncertainty and the extrapolation percentage used
+  a calibration shot that was not applied before the first / after the last shot. An image without any
+  capture time was treated as taken "now"; with several shots it is now an error. Date-only timestamps and
+  two-digit UTC offsets were mis-parsed. Four corners clicked in Z order made a bow-tie polygon; corners
+  are now ordered. Non-georeferenced inputs got an invented geotransform. Cancelling a batch reported
+  success. Emissivity correction now works in apparent-temperature space (fit, apply, then convert).
 
 ### Added
 - Fit diagnostics: residuals, RMSE, standard errors of m and b, leave-one-out error, ±1σ prediction band,
@@ -50,10 +59,10 @@ should re-run it; the cases below say when the old output was affected.
 - Batch processing in a worker thread with Cancel and a live results table.
 - Project files (`*.calib.json`) and a headless command line (`--project FILE --run`); every run saves the
   project next to its outputs.
-- Test suite (137 tests), golden regression data, continuous integration, GPL-3.0 license, citation file.
+- Test suite (159 tests), golden regression data, continuous integration, GPL-3.0 license, citation file.
 
 ### Changed
-- Minimum supported Python is 3.9; `piexif` is optional.
+- Minimum supported Python is 3.10; `piexif` is optional.
 - The processing log gained columns (`timestamp_source`, `timestamp_tz`, `position_vs_calibration`,
   `pct_pixels_outside_target_range`, `u_fit_1sigma`). The column list is pinned by a test.
 - Survey images are given as a folder (plus an optional filename filter), no longer as a file list.

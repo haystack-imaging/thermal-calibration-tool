@@ -43,7 +43,6 @@ import numpy as np
 import pandas as pd
 import rasterio
 from PIL import Image, ImageTk
-from rasterio.transform import from_bounds
 from scipy import stats
 
 try:  # optional: EXIF reading for JPEG/TIFF via piexif
@@ -113,7 +112,10 @@ class CalibrationTarget:
         return len(self.polygon) >= 3
 
     def is_complete(self) -> bool:
-        return self.has_polygon() and self.drone_mean is not None and self.ground_truth is not None
+        """Usable in a fit: polygon drawn, a finite ROI mean (a polygon outside the image or over NaN pixels
+        has none) and a reference value entered."""
+        return (self.has_polygon() and self.drone_mean is not None and math.isfinite(self.drone_mean)
+                and self.ground_truth is not None and math.isfinite(self.ground_truth))
 
     def to_dict(self) -> dict:
         return {"name": self.name, "color": self.color, "polygon": [list(p) for p in self.polygon],
@@ -133,7 +135,7 @@ class FitResult:
     n: int
     single_point: bool = False
     r_squared: Optional[float] = None
-    rmse: Optional[float] = None                 # root mean square of residuals (n-1 ... biased, descriptive)
+    rmse: Optional[float] = None                 # root mean square of the residuals, sqrt(SSE / n), descriptive
     resid_std: Optional[float] = None            # residual standard error, s = sqrt(SSE / (n-2)), n > 2
     se_slope: Optional[float] = None
     se_intercept: Optional[float] = None
@@ -160,7 +162,8 @@ class FitResult:
     def summary_line(self, unit: str) -> str:
         if self.single_point:
             return f"K = {self.slope:.8f}"
-        s = f"m = {self.slope:.4f}, b = {self.intercept:.4f}, R² = {self.r_squared:.4f}, n = {self.n}"
+        r2 = f"{self.r_squared:.4f}" if self.r_squared is not None and math.isfinite(self.r_squared) else "n/a"
+        s = f"m = {self.slope:.4f}, b = {self.intercept:.4f}, R² = {r2}, n = {self.n}"
         if self.rmse is not None:
             s += f", RMSE = {self.rmse:.2f} {unit}"
         return s
@@ -181,7 +184,14 @@ class EmissivitySettings:
     @classmethod
     def from_dict(cls, d: dict) -> "EmissivitySettings":
         return cls(bool(d.get("enabled", False)), float(d.get("target_emissivity", 0.95)),
-                   float(d.get("scene_emissivity", 0.98)), float(d.get("sky_temperature", -40.0)))
+                   float(d.get("scene_emissivity", 0.98)), float(d.get("sky_temperature", -40.0))).bounded()
+
+    def bounded(self) -> "EmissivitySettings":
+        """Emissivities outside (0.5, 1] and sky temperatures outside [-100, 60] °C are typing errors."""
+        self.target_emissivity = min(max(self.target_emissivity, 0.5), 1.0)
+        self.scene_emissivity = min(max(self.scene_emissivity, 0.5), 1.0)
+        self.sky_temperature = min(max(self.sky_temperature, -100.0), 60.0)
+        return self
 
 
 @dataclass
@@ -242,17 +252,30 @@ class CalibrationEvent:
             t.color = COLOR_PALETTE[i % len(COLOR_PALETTE)]
         return True
 
-    def to_dict(self) -> dict:
-        return {"path": self.image_path, "timestamp": self.timestamp.isoformat(),
-                "timestamp_source": self.timestamp_source, "timestamp_tz": self.timestamp_tz,
-                "targets": [t.to_dict() for t in self.targets]}
+    def to_dict(self, project_dir: Optional[str] = None) -> dict:
+        d = {"path": os.path.abspath(self.image_path), "timestamp": self.timestamp.isoformat(),
+             "timestamp_source": self.timestamp_source, "timestamp_tz": self.timestamp_tz,
+             "targets": [t.to_dict() for t in self.targets]}
+        if project_dir:
+            try:
+                d["path_relative"] = os.path.relpath(os.path.abspath(self.image_path), project_dir)
+            except ValueError:          # different drive on Windows
+                pass
+        if self.fit is not None:        # a record of what was fitted, for the reader; recomputed on load
+            f = self.fit
+            d["fit"] = {"slope": f.slope, "intercept": f.intercept, "n": f.n, "r_squared": f.r_squared,
+                        "rmse": f.rmse, "resid_std": f.resid_std, "se_slope": f.se_slope, "se_intercept": f.se_intercept,
+                        "loo_rmse": f.loo_rmse, "single_point": f.single_point}
+            d["targets_measured"] = [{"name": t.name, "mean": t.drone_mean, "std": t.drone_std, "pixels": t.pixel_count}
+                                     for t in self.targets if t.is_complete()]
+        return d
 
 
 # =============================================================================
 # TIMESTAMPS
 # =============================================================================
 
-_TZ_RE = re.compile(r'(Z|[+-]\d{2}:?\d{2})$')
+_TZ_RE = re.compile(r'(Z|[+-]\d{2}(?::?\d{2})?)$')
 
 
 def _parse_datetime_string(dt_str: str) -> Tuple[Optional[datetime], str]:
@@ -267,21 +290,23 @@ def _parse_datetime_string(dt_str: str) -> Tuple[Optional[datetime], str]:
     dt_str = dt_str.strip()
     tz = ""
     m = _TZ_RE.search(dt_str)
-    if m:
+    if m and len(dt_str) > 10:              # a date-only string has no zone to strip
         tz = m.group(1)
         dt_str = dt_str[:m.start()]
+    if len(dt_str) < 16 or not (dt_str[10:11] in ('T', ' ')):
+        return None, ""                     # date without a time is useless for interpolation
     candidates = [dt_str]
     if dt_str[4:5] == ':' and dt_str[7:8] == ':':      # EXIF style 2026:06:01 10:00:00
         candidates.append(dt_str[:4] + '-' + dt_str[5:7] + '-' + dt_str[8:])
     for cand in candidates:
         try:
-            return datetime.fromisoformat(cand.replace(' ', 'T', 1)), tz
+            return datetime.fromisoformat(cand.replace(' ', 'T', 1)).replace(tzinfo=None), tz
         except ValueError:
             pass
     for fmt in ('%Y:%m:%d %H:%M:%S', '%Y:%m:%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M:%S.%f',
                 '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
         try:
-            return datetime.strptime(dt_str, fmt), tz
+            return datetime.strptime(dt_str, fmt).replace(tzinfo=None), tz
         except ValueError:
             continue
     return None, ""
@@ -432,7 +457,10 @@ def load_thermal_image(image_path: str) -> np.ndarray:
                          "temperatures or DN; a colour R-JPEG preview must be converted first (see README).")
     try:
         with rasterio.open(image_path) as src:
-            return src.read(1).astype(np.float32)
+            arr = src.read(1).astype(np.float32)
+            if src.nodata is not None and not (isinstance(src.nodata, float) and math.isnan(src.nodata)):
+                arr[arr == src.nodata] = np.nan      # nodata is not a temperature
+            return arr
     except Exception:
         with Image.open(image_path) as img:
             return np.array(img, dtype=np.float32)
@@ -484,18 +512,42 @@ def polygon_mask(polygon: List[Tuple[int, int]], image_shape: Tuple[int, ...],
     return mask, False
 
 
-def inner_roi_contour(polygon: List[Tuple[int, int]], image_shape: Tuple[int, ...],
-                      inset_px: int = DEFAULT_ROI_INSET_PX) -> List[Tuple[int, int]]:
-    """Outline of the eroded region, for drawing."""
+def inner_roi_contours(polygon: List[Tuple[int, int]], image_shape: Tuple[int, ...],
+                       inset_px: int = DEFAULT_ROI_INSET_PX) -> List[List[Tuple[int, int]]]:
+    """Outlines of the eroded region (every piece of it), for drawing."""
     mask, applied = polygon_mask(polygon, image_shape, inset_px)
     if not applied:
         return []
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return []
-    c = max(contours, key=cv2.contourArea)
-    c = cv2.approxPolyDP(c, 0.8, True)
-    return [(int(p[0][0]), int(p[0][1])) for p in c]
+    out = []
+    for c in contours:
+        c = cv2.approxPolyDP(c, 0.8, True)
+        if len(c) >= 3:
+            out.append([(int(p[0][0]), int(p[0][1])) for p in c])
+    return out
+
+
+def inner_roi_contour(polygon: List[Tuple[int, int]], image_shape: Tuple[int, ...],
+                      inset_px: int = DEFAULT_ROI_INSET_PX) -> List[Tuple[int, int]]:
+    """Largest outline of the eroded region (kept for compatibility; drawing uses inner_roi_contours)."""
+    pieces = inner_roi_contours(polygon, image_shape, inset_px)
+    return max(pieces, key=len) if pieces else []
+
+
+def order_corners(points: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """Order clicked corners around their centroid so four clicks always give a simple quadrilateral,
+    never a bow-tie (which fillPoly would fill as two triangles)."""
+    if len(points) < 3:
+        return list(points)
+    cx = sum(p[0] for p in points) / len(points)
+    cy = sum(p[1] for p in points) / len(points)
+    return sorted(points, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+
+
+def polygon_is_convex(points: List[Tuple[int, int]]) -> bool:
+    if len(points) < 3:
+        return False
+    return bool(cv2.isContourConvex(np.array(points, dtype=np.int32).reshape(-1, 1, 2)))
 
 
 @dataclass
@@ -520,6 +572,15 @@ def extract_roi_statistics(image: np.ndarray, polygon: List[Tuple[int, int]],
 # PHYSICS
 # =============================================================================
 
+def apparent_temperature(T_true: np.ndarray, emissivity: float, T_sky: float) -> np.ndarray:
+    """Forward grey-body model: the apparent temperature a sensor set to ε = 1 reports for a surface at
+    T_true with emissivity ε, reflecting a sky at T_sky (broadband Stefan-Boltzmann approximation)."""
+    T_K = np.asarray(T_true, dtype=np.float64) + 273.15
+    T_sky_K = T_sky + 273.15
+    T_app_K4 = emissivity * T_K ** 4 + (1.0 - emissivity) * T_sky_K ** 4
+    return (np.power(np.maximum(T_app_K4, 0.0), 0.25) - 273.15).astype(np.float32)
+
+
 def apply_emissivity_correction(T_app: np.ndarray, emissivity: float, T_sky: float) -> np.ndarray:
     """Apparent -> surface temperature for a grey body, broadband Stefan-Boltzmann approximation:
         T_obj^4 = (T_app^4 - (1 - e) * T_sky^4) / e
@@ -528,6 +589,8 @@ def apply_emissivity_correction(T_app: np.ndarray, emissivity: float, T_sky: flo
     setting (0.95 by default) when converting R-JPEGs, so only enable this for images converted
     with emissivity 1.0.
     """
+    if not 0.0 < emissivity <= 1.0:
+        raise ValueError("emissivity must be in (0, 1]")
     T_app_K = np.asarray(T_app, dtype=np.float64) + 273.15
     T_sky_K = T_sky + 273.15
     T_obj_K4 = (T_app_K ** 4 - (1.0 - emissivity) * T_sky_K ** 4) / emissivity
@@ -550,13 +613,16 @@ def compute_linear_regression(drone_values: List[float], ground_truths: List[flo
     n = int(x.size)
     if n < 2:
         raise ValueError("at least two targets are needed for a linear fit")
+    if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+        raise ValueError("a target has no valid sensor value or reference value (NaN)")
     if np.ptp(x) == 0:
         raise ValueError("all targets have the same sensor value; the slope cannot be determined")
     res = stats.linregress(x, y)
     slope, intercept = float(res.slope), float(res.intercept)
     pred = slope * x + intercept
     resid = y - pred
-    fit = FitResult(slope=slope, intercept=intercept, n=n, r_squared=float(res.rvalue ** 2),
+    r2 = float(res.rvalue ** 2) if math.isfinite(res.rvalue) else None      # undefined when all y are equal
+    fit = FitResult(slope=slope, intercept=intercept, n=n, r_squared=r2,
                     residuals=[float(r) for r in resid], x_values=[float(v) for v in x],
                     y_values=[float(v) for v in y], x_mean=float(x.mean()),
                     sxx=float(((x - x.mean()) ** 2).sum()), x_min=float(x.min()), x_max=float(x.max()))
@@ -580,6 +646,8 @@ def compute_linear_regression(drone_values: List[float], ground_truths: List[flo
 
 def compute_single_point(drone_value: float, ground_truth: float) -> FitResult:
     """MSI single-point calibration: reflectance = K * DN, K from one panel."""
+    if not (math.isfinite(drone_value) and math.isfinite(ground_truth)):
+        raise ValueError("panel DN or reflectance is not a number")
     if drone_value == 0:
         raise ValueError("panel DN is zero")
     k = float(ground_truth) / float(drone_value)
@@ -595,14 +663,16 @@ def recompute_fit(event: CalibrationEvent, single_point: bool, thermal: bool,
     xs, ys = [], []
     for t in targets:
         if t.is_complete():
-            x = t.drone_mean
+            y = t.ground_truth
             if thermal and emissivity and emissivity.enabled:
-                # correct the panel reading with the panel's own emissivity so the fit and the
-                # survey images (corrected with the scene emissivity) live in the same space
-                x = float(apply_emissivity_correction(np.array([x]), emissivity.target_emissivity,
-                                                      emissivity.sky_temperature)[0])
-            xs.append(x)
-            ys.append(t.ground_truth)
+                # The sensor drifts in what it sees, apparent temperature. So the fit maps raw sensor
+                # values to the *apparent* temperature of each panel (its true temperature through the
+                # panel's emissivity); the batch applies m, b to raw pixels and converts the result to
+                # surface temperature with the scene emissivity afterwards.
+                y = float(apparent_temperature(np.array([y]), emissivity.target_emissivity,
+                                               emissivity.sky_temperature)[0])
+            xs.append(t.drone_mean)
+            ys.append(y)
     event.fit = None
     try:
         if single_point:
@@ -624,8 +694,9 @@ def coefficients_at(timestamp: datetime, events: List[CalibrationEvent]
     """Piecewise-linear interpolation of (m, b) through *all* fitted calibration events.
 
     Returns (m, b, position, bracketing pair). position is 'single', 'before', 'between' or
-    'after'. Outside the calibration window the nearest event's coefficients are used unchanged
-    (clamped), and the pair is the nearest two events so a drift estimate can still be given.
+    'after' (an image at exactly an event time counts as 'between'). Outside the calibration window
+    the nearest event's coefficients are used unchanged (clamped); the pair then still names the
+    nearest two events, but only the first/last of them is applied.
     """
     fitted = sorted([e for e in events if e.fit is not None], key=lambda e: e.timestamp)
     if not fitted:
@@ -635,11 +706,11 @@ def coefficients_at(timestamp: datetime, events: List[CalibrationEvent]
         return e.fit.slope, e.fit.intercept, 'single', (e, e)
     ts = [e.timestamp.timestamp() for e in fitted]
     t = timestamp.timestamp()
-    if t <= ts[0]:
+    if t < ts[0]:
         return fitted[0].fit.slope, fitted[0].fit.intercept, 'before', (fitted[0], fitted[1])
-    if t >= ts[-1]:
+    if t > ts[-1]:
         return fitted[-1].fit.slope, fitted[-1].fit.intercept, 'after', (fitted[-2], fitted[-1])
-    i = bisect.bisect_right(ts, t) - 1
+    i = min(bisect.bisect_right(ts, t) - 1, len(fitted) - 2)
     e0, e1 = fitted[i], fitted[i + 1]
     f = (t - ts[i]) / (ts[i + 1] - ts[i])
     m = e0.fit.slope + f * (e1.fit.slope - e0.fit.slope)
@@ -660,33 +731,36 @@ def interpolate_coefficients(timestamp: datetime, event_start: CalibrationEvent,
 # =============================================================================
 
 def save_calibrated_geotiff(image: np.ndarray, output_path: str, source_path: Optional[str] = None,
-                            extra_tags: Optional[Dict[str, str]] = None, copy_metadata: bool = True
-                            ) -> List[str]:
+                            extra_tags: Optional[Dict[str, str]] = None, copy_metadata: bool = True,
+                            defer_exiftool: bool = False) -> List[str]:
     """Write a 32-bit float GeoTIFF (LZW, floating-point predictor).
 
-    Georeferencing, GDAL metadata (TIFFTAG_DATETIME etc.) and the EXIF domain are copied from the
-    source. If exiftool is on the PATH, the full EXIF/XMP/GPS block is copied too, so photogrammetry
-    software keeps camera positions and capture times. Returns notes for the log.
+    Georeferencing and GDAL metadata (TIFFTAG_DATETIME etc.) are copied from the source; a source
+    without georeferencing gets none (no invented transform). NaN pixels are declared as nodata. If
+    exiftool is on the PATH, the full EXIF/XMP/GPS block is copied too, so photogrammetry software keeps
+    camera positions and capture times; without it the EXIF tags are kept as GDAL metadata. Returns
+    notes for the log.
     """
     notes: List[str] = []
     height, width = image.shape[:2]
     transform, crs = None, None
     src_tags: Dict[str, str] = {}
     src_exif: Dict[str, str] = {}
+    have_exiftool = bool(shutil.which('exiftool'))
     if source_path:
         try:
             with rasterio.open(source_path) as src:
-                transform, crs = src.transform, src.crs
+                if src.crs is not None or not src.transform.is_identity:
+                    transform, crs = src.transform, src.crs
                 if copy_metadata:
                     src_tags = dict(src.tags())
-                    if 'EXIF' in src.tag_namespaces():
+                    if not have_exiftool and 'EXIF' in src.tag_namespaces():
                         src_exif = dict(src.tags(ns='EXIF'))
         except Exception as e:
             notes.append(f"could not read georeferencing of source: {e}")
-    if transform is None or transform.is_identity:
-        transform = from_bounds(0, 0, width, height, width, height)
     with rasterio.open(output_path, 'w', driver='GTiff', height=height, width=width, count=1,
-                       dtype=np.float32, crs=crs, transform=transform, compress='LZW', predictor=3) as dst:
+                       dtype=np.float32, crs=crs, transform=transform, compress='LZW', predictor=3,
+                       nodata=float('nan')) as dst:
         dst.write(image.astype(np.float32), 1)
         tags = {k: v for k, v in src_tags.items() if not k.startswith('TIFFTAG_SOFTWARE')}
         tags.update(src_exif)
@@ -695,26 +769,53 @@ def save_calibrated_geotiff(image: np.ndarray, output_path: str, source_path: Op
         tags['TIFFTAG_SOFTWARE'] = f"{TOOL_NAME} {__version__}"
         if tags:
             dst.update_tags(**tags)
-    if copy_metadata and source_path and shutil.which('exiftool'):
-        try:
-            # copy EXIF/XMP/GPS, but never the source's GDAL metadata, software tag or GeoTIFF keys:
-            # those describe the *output* (calibration formula, our georeferencing) and were just written
-            subprocess.run(['exiftool', '-overwrite_original', '-q', '-q', '-tagsFromFile', str(source_path),
-                            '-all:all', '-xmp', '-gps:all', '-EXIF:DateTimeOriginal',
-                            '--GDALMetadata', '--GDALNoData', '--Software', '--GeoTiffDirectory',
-                            '--GeoTiffDoubleParams', '--GeoTiffAsciiParams', '--ModelTiePoint', '--PixelScale',
-                            '--ModelTransform', str(output_path)],
-                           check=True, capture_output=True, timeout=60)
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-            notes.append(f"exiftool metadata copy failed: {e}")
+    if copy_metadata and source_path and have_exiftool and not defer_exiftool:
+        # copy EXIF/XMP/GPS, but never the source's GDAL metadata, software tag or GeoTIFF keys:
+        # those describe the *output* (calibration formula, our georeferencing) and were just written
+        notes += copy_metadata_with_exiftool([(str(source_path), str(output_path))])
     return notes
 
 
 def project_filename(project: Optional[dict]) -> str:
     """`<title>.calib.json`, the file name a project is saved under next to the outputs."""
     title = (project or {}).get("title") or "calibration_project"
-    safe = re.sub(r'[^\w.-]+', '_', str(title)).strip('_') or "calibration_project"
+    safe = re.sub(r'[^\w.-]+', '_', str(title)).strip('_')[:80].rstrip('_') or "calibration_project"
     return safe + PROJECT_EXT
+
+
+EXIFTOOL_COPY_ARGS = ['-all:all', '-xmp', '-gps:all', '-EXIF:DateTimeOriginal',
+                      '--GDALMetadata', '--GDALNoData', '--Software', '--GeoTiffDirectory',
+                      '--GeoTiffDoubleParams', '--GeoTiffAsciiParams', '--ModelTiePoint', '--PixelScale',
+                      '--ModelTransform']
+
+
+def copy_metadata_with_exiftool(pairs: List[Tuple[str, str]], log: Optional[Callable[[str], None]] = None) -> List[str]:
+    """Copy EXIF/XMP/GPS from each source to its output in ONE exiftool process (an argument file with
+    -execute separators). Per-image processes cost about 0.25 s each; this takes about that for all."""
+    notes: List[str] = []
+    if not pairs or not shutil.which('exiftool'):
+        return notes
+    import tempfile
+    with tempfile.NamedTemporaryFile('w', suffix='.args', delete=False, encoding='utf-8') as f:
+        for src, dst in pairs:
+            f.write("\n".join(['-overwrite_original', '-q', '-q', '-tagsFromFile', str(src)] + EXIFTOOL_COPY_ARGS
+                               + [str(dst), '-execute']) + "\n")
+        argfile = f.name
+    try:
+        r = subprocess.run(['exiftool', '-@', argfile], capture_output=True, text=True, timeout=60 + 2 * len(pairs))
+        if r.returncode != 0 or r.stderr.strip():
+            notes.append(f"exiftool metadata copy reported: {(r.stderr or r.stdout).strip()[:300]}")
+    except (subprocess.SubprocessError, OSError) as e:
+        notes.append(f"exiftool metadata copy failed: {e}")
+    finally:
+        try:
+            os.unlink(argfile)
+        except OSError:
+            pass
+    if log:
+        for n in notes:
+            log(n)
+    return notes
 
 
 def output_filenames(files: List[Path]) -> Dict[Path, str]:
@@ -805,6 +906,8 @@ def preflight(job: BatchJob, timestamps: Optional[Dict[Path, Timestamp]] = None)
     rep.add('ok', f"{len(fitted)} calibration event(s): " + ", ".join(
         f"{e.timestamp:%H:%M:%S} ({e.timestamp_source})" for e in fitted))
     for e in fitted:
+        if not (math.isfinite(e.fit.slope) and math.isfinite(e.fit.intercept)):
+            rep.add('block', f"{os.path.basename(e.image_path)}: the fitted coefficients are not finite.")
         if not e.fit.single_point and e.fit.n == 2:
             rep.add('warn', f"{os.path.basename(e.image_path)}: only 2 targets, R² is 1 by construction and the "
                             "fit uncertainty cannot be estimated. A third target would fix that.")
@@ -860,10 +963,17 @@ def preflight(job: BatchJob, timestamps: Optional[Dict[Path, Timestamp]] = None)
     rep.add(level, f"Capture times: {src_txt}." + (" File modification times change on every copy; "
                                                    "interpolation between calibration shots is then meaningless."
                                                    if level == 'warn' else ""))
+    if src_counts.get('none') and len(fitted) > 1:
+        rep.add('block', f"{src_counts['none']} image(s) have no capture time at all; with several calibration "
+                         "shots they cannot be placed in time. Fix the metadata or use one calibration shot.")
     cal_zones = {e.timestamp_tz or 'none' for e in fitted}
-    if len(set(zones) | cal_zones) > 1 and ('Z' in zones or 'Z' in cal_zones):
+    all_zones = set(zones) | cal_zones
+    if len(all_zones) > 1 and ('Z' in all_zones):
         rep.add('warn', "Some timestamps are in UTC ('Z') and others in local time; check that calibration and "
                         "survey images were converted the same way, otherwise they are hours apart.")
+    elif len({z for z in all_zones if z not in ('', 'none')}) > 1:
+        rep.add('warn', f"Timestamps carry different UTC offsets ({', '.join(sorted(z for z in all_zones if z not in ('', 'none')))}); "
+                        "all times are compared as local wall time, so an offset change shifts images by that difference.")
     if len(fitted) > 1:
         if before:
             rep.add('warn', f"{before} image(s) taken before the first calibration shot ({t0:%H:%M:%S}): the first "
@@ -888,6 +998,13 @@ def preflight(job: BatchJob, timestamps: Optional[Dict[Path, Timestamp]] = None)
                             "(they are excluded from later runs by their _calibrated suffix).")
     except OSError:
         pass
+    try:
+        job.output_folder.mkdir(parents=True, exist_ok=True)
+        probe = job.output_folder / ".write_test"
+        probe.write_bytes(b"")
+        probe.unlink()
+    except OSError as e:
+        rep.add('block', f"Output folder cannot be written: {e}")
     if job.thermal and job.emissivity.enabled:
         rep.add('warn', f"Emissivity correction is ON (panels ε={job.emissivity.target_emissivity}, scene "
                         f"ε={job.emissivity.scene_emissivity}). Only correct if the images were converted "
@@ -918,9 +1035,12 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
     rows: List[dict] = []
     n_ok = n_err = n_skip = 0
     total = len(job.survey_files)
+    cancelled = False
+    exif_pairs: List[Tuple[str, str]] = []
     for i, img_path in enumerate(job.survey_files):
         if is_cancelled():
             log("Cancelled.")
+            cancelled = True
             break
         name = img_path.name
         out_name = names[img_path]
@@ -936,32 +1056,45 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
                     on_row(row)
                 continue
             ts = (timestamps or {}).get(img_path) or extract_timestamp(str(img_path))
-            when = ts.value or datetime.now()
+            if ts.value is None and len(fitted) > 1:
+                raise ValueError("no capture time in the metadata; cannot place the image between the "
+                                 "calibration shots")
+            when = ts.value if ts.value is not None else fitted[0].timestamp
             m, b, position, pair = coefficients_at(when, fitted)
+            if not (math.isfinite(m) and math.isfinite(b)):
+                raise ValueError("calibration coefficients are not finite")
             img = load_thermal_image(str(img_path))
             finite = np.isfinite(img)
+            if not finite.any():
+                raise ValueError("the image has no valid pixels")
             o_mean, o_min, o_max = float(np.mean(img[finite])), float(np.min(img[finite])), float(np.max(img[finite]))
-            if em.enabled:
-                img = apply_emissivity_correction(img, em.scene_emissivity, em.sky_temperature)
-            calibrated = (m * img + b).astype(np.float32)
+            calibrated = (m * img + b).astype(np.float32)        # calibrated apparent temperature
+            if em.enabled:                                      # then surface temperature of the scene
+                calibrated = apply_emissivity_correction(calibrated, em.scene_emissivity, em.sky_temperature)
             c_mean = float(np.mean(calibrated[finite]))
-            # --- regression prediction uncertainty at the image's mean sensor value (needs >= 3 targets)
+            # --- regression prediction uncertainty at the image's mean sensor value (needs >= 3 targets):
+            # only the events whose coefficients are applied count. Between two shots both are
+            # interpolated, and the larger of their two uncertainties is reported.
             x0 = float(np.mean(img[finite]))
-            e0, e1 = pair
-            u_fit_vals = [u for u in (e0.fit.predict_uncertainty(x0), e1.fit.predict_uncertainty(x0)) if u is not None]
+            applied = list(pair) if position == 'between' else [pair[0] if position in ('before', 'single') else pair[1]]
+            u_fit_vals = [u for u in (e.fit.predict_uncertainty(x0) for e in applied) if u is not None]
             u_fit = max(u_fit_vals) if u_fit_vals else None
-            xr_min = min(e.fit.x_min for e in (e0, e1))
-            xr_max = max(e.fit.x_max for e in (e0, e1))
+            xr_min = min(e.fit.x_min for e in applied)
+            xr_max = max(e.fit.x_max for e in applied)
             outside = float(np.mean((img[finite] < xr_min) | (img[finite] > xr_max)) * 100.0)
             tags = {'CALIBRATION_FORMULA': f"out = {m:.6f} * in + {b:.6f}",
                     'CALIBRATION_SLOPE': f"{m:.8f}", 'CALIBRATION_INTERCEPT': f"{b:.8f}",
                     'CALIBRATION_EVENTS': str(len(fitted)), 'CALIBRATION_POSITION': position,
                     'CALIBRATION_FIT_UNCERTAINTY_1SIGMA': f"{u_fit:.3f}" if u_fit is not None else "n/a"}
-            notes = save_calibrated_geotiff(calibrated, str(out_path), str(img_path), tags, job.copy_metadata)
+            notes = save_calibrated_geotiff(calibrated, str(out_path), str(img_path), tags, job.copy_metadata,
+                                            defer_exiftool=True)
+            if job.copy_metadata:
+                exif_pairs.append((str(img_path), str(out_path)))
             for n_ in notes:
                 log(f"  {name}: {n_}")
             row.update({
-                'timestamp': when.isoformat(), 'timestamp_source': ts.source, 'timestamp_tz': ts.tz or '',
+                'timestamp': when.isoformat() if ts.value is not None else '', 'timestamp_source': ts.source,
+                'timestamp_tz': ts.tz or '',
                 'position_vs_calibration': position,
                 'slope_m': round(m, 8), 'intercept_b': round(b, 6),
                 'formula_applied': (f"Refl = {m:.10f} * DN" if job.single_point else f"Out = {m:.6f} * In + {b:.6f}"),
@@ -985,6 +1118,9 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
         rows.append(row)
         if on_row:
             on_row(row)
+    if exif_pairs:
+        progress(total, total, "copying EXIF/XMP/GPS metadata")
+        copy_metadata_with_exiftool(exif_pairs, log)
     progress(total, total, "")
 
     log_df = pd.DataFrame(rows)
@@ -992,9 +1128,18 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
     log_df.to_csv(csv_path, index=False, encoding='utf-8')
     project_path = None
     if job.project is not None:            # the project is saved next to the outputs, so a run is reproducible
-        project_path = out_dir / project_filename(job.project)
-        with open(project_path, 'w', encoding='utf-8') as f:
-            json.dump(job.project, f, indent=2)
+        try:
+            project_path = out_dir / project_filename(job.project)
+            copy = dict(job.project)
+            copy["calibration_images"] = [e.to_dict(str(out_dir.resolve())) for e in fitted]
+            copy["survey"] = dict(copy.get("survey", {}),
+                                  folder=str(job.survey_files[0].parent.resolve()) if job.survey_files else copy.get("survey", {}).get("folder", ""),
+                                  output_folder=str(out_dir.resolve()))
+            with open(project_path, 'w', encoding='utf-8') as f:
+                json.dump(copy, f, indent=2)
+        except OSError as e:
+            log(f"could not write the project file next to the outputs: {e}")
+            project_path = None
     with open(out_dir / "processing_summary.txt", 'w', encoding='utf-8') as f:
         f.write(f"IMAGE CALIBRATION PROCESSING SUMMARY ({'Thermal' if job.thermal else 'MSI'})\n")
         f.write("=" * 60 + "\n\n")
@@ -1018,19 +1163,23 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
             f.write("m and b interpolated linearly in time between consecutive calibration images\n"
                     if len(fitted) > 1 else "constant m and b (single calibration image)\n")
         if em.enabled:
-            f.write(f"Emissivity correction: panels ε={em.target_emissivity} (applied before the fit), "
-                    f"scene ε={em.scene_emissivity} (applied to survey pixels), T_sky={em.sky_temperature} °C, "
-                    "broadband Stefan-Boltzmann approximation\n")
+            f.write(f"Emissivity correction: the reference readings were converted to apparent temperature with the\n"
+                    f"panel emissivity ε={em.target_emissivity} before the fit; m and b were applied to the raw pixels;\n"
+                    f"the result was converted to surface temperature with the scene emissivity ε={em.scene_emissivity}\n"
+                    f"(T_sky={em.sky_temperature} °C, broadband grey-body approximation).\n")
         else:
             f.write("Emissivity correction: off\n")
         f.write("\nUNCERTAINTY\n" + "-" * 40 + "\n")
         f.write("u_fit_1sigma: 1-sigma prediction uncertainty of the regression at the image mean sensor value,\n")
-        f.write("              s * sqrt(1 + 1/n + (x - mean)^2 / Sxx); needs at least 3 targets.\n")
+        f.write("              s * sqrt(1 + 1/n + (x - mean)^2 / Sxx) with s = sqrt(SSE / (n - 2)); needs at least\n")
+        f.write("              3 targets. Between two calibration shots the larger of the two is reported. With few\n")
+        f.write("              targets this 1-sigma band is optimistic (t quantile: 1.84x at n = 3, 1.32x at n = 4).\n")
+        f.write("pct_pixels_outside_target_range: pixels colder or warmer than the targets of the applied shot(s).\n")
         f.write("Not included: reference instrument accuracy, drift between calibration events (see\n")
         f.write("position_vs_calibration), panel emissivity mismatch, atmospheric path, sensor non-uniformity.\n")
-    log(f"\nDone: {n_ok} ok, {n_err} errors, {n_skip} skipped. Log: {csv_path}"
-        + (f", project: {project_path.name}" if project_path else ""))
-    return {'ok': n_ok, 'errors': n_err, 'skipped': n_skip, 'csv': str(csv_path),
+    log(f"\n{'Cancelled' if cancelled else 'Done'}: {n_ok} ok, {n_err} errors, {n_skip} skipped"
+        + (f" of {total}" if cancelled else "") + f". Log: {csv_path}" + (f", project: {project_path.name}" if project_path else ""))
+    return {'ok': n_ok, 'errors': n_err, 'skipped': n_skip, 'total': total, 'cancelled': cancelled, 'csv': str(csv_path),
             'summary': str(out_dir / 'processing_summary.txt'), 'project': str(project_path) if project_path else None,
             'rows': rows}
 
@@ -1091,10 +1240,14 @@ def fit_report_html(event: CalibrationEvent, unit: str, events: List[Calibration
         return "n/a" if v is None else f"{v:.{nd}f}"
     rows = []
     complete = [t for t in event.targets if t.is_complete()]
-    for t, r in zip(complete, fit.residuals if not fit.single_point else [0.0]):
+    fitted_y = fit.y_values if not fit.single_point else [complete[0].ground_truth]
+    converted = any(abs(y - t.ground_truth) > 1e-9 for t, y in zip(complete, fitted_y))
+    for t, y, r in zip(complete, fitted_y, fit.residuals if not fit.single_point else [0.0]):
         rows.append(f"<tr><td><span class='sw' style='background:{t.color}'></span>{esc(t.name)}</td>"
                     f"<td>{num(t.drone_mean, 3)}</td><td>{num(t.drone_std, 3)}</td><td>{t.pixel_count}</td>"
-                    f"<td>{num(t.ground_truth, 2)}</td><td>{num(r, 3)}</td></tr>")
+                    f"<td>{num(t.ground_truth, 2)}</td>" + (f"<td>{num(y, 3)}</td>" if converted else "")
+                    + f"<td>{num(r, 3)}</td></tr>")
+    fitted_head = "<th>Fitted reference, apparent (°C)</th>" if converted else ""
     if fit.single_point:
         coeff = f"<p class='big'>ρ = K × DN, K = {fit.slope:.8f}</p>"
         diag = "<p>Single-point calibration: no residual statistics are possible.</p>"
@@ -1130,7 +1283,7 @@ img{{max-width:100%;border:1px solid #d9dcd6;margin-top:8px}}</style></head><bod
 <p class='muted'>{esc(os.path.basename(event.image_path))} · captured {event.timestamp:%Y-%m-%d %H:%M:%S}{esc(event.timestamp_tz)}
 ({esc(event.timestamp_source)}) · generated {datetime.now():%Y-%m-%d %H:%M} by {TOOL_NAME} {__version__}</p>
 <h2>Targets</h2>
-<table><tr><th>Target</th><th>Sensor mean ({esc(unit)})</th><th>σ</th><th>pixels</th><th>Reference ({esc(unit)})</th><th>Residual</th></tr>{''.join(rows)}</table>
+<table><tr><th>Target</th><th>Sensor mean ({esc(unit)})</th><th>σ</th><th>pixels</th><th>Reference ({esc(unit)})</th>{fitted_head}<th>Residual</th></tr>{''.join(rows)}</table>
 <h2>Coefficients</h2>{coeff}<h2>Diagnostics</h2>{diag}{img}
 <h2>Method</h2><p>{esc(method)}</p>
 {('<h2>Settings</h2><table>' + srows + '</table>') if srows else ''}
@@ -1143,11 +1296,13 @@ img{{max-width:100%;border:1px solid #d9dcd6;margin-top:8px}}</style></head><bod
 
 def events_to_project(events: List[CalibrationEvent], mode: str, single_point: bool,
                       emissivity: EmissivitySettings, roi_inset_px: int, survey: Optional[dict] = None,
-                      title: str = "") -> dict:
+                      title: str = "", project_dir: Optional[str] = None) -> dict:
+    """The project as JSON. Image paths are stored absolute and, when `project_dir` is given, also
+    relative to it, so a folder that moves as a whole still opens."""
     return {"tool": "thermal_calibration_tool", "version": __version__, "saved": datetime.now().isoformat(),
             "title": title, "mode": mode, "msi_single_point": single_point, "roi_inset_px": roi_inset_px,
             "emissivity": emissivity.to_dict(),
-            "calibration_images": [e.to_dict() for e in events], "survey": survey or {}}
+            "calibration_images": [e.to_dict(project_dir) for e in events], "survey": survey or {}}
 
 
 def events_from_project(project: dict, project_dir: Optional[str], roi_inset_px: int) -> Tuple[List[CalibrationEvent], List[str]]:
@@ -1156,9 +1311,11 @@ def events_from_project(project: dict, project_dir: Optional[str], roi_inset_px:
     for d in project.get("calibration_images", []):
         path = d.get("path", "")
         if not os.path.exists(path) and project_dir:
-            alt = os.path.join(project_dir, os.path.basename(path))
-            if os.path.exists(alt):
-                path = alt
+            for alt in ([os.path.join(project_dir, d["path_relative"])] if d.get("path_relative") else []) + \
+                       [os.path.join(project_dir, os.path.basename(path))]:
+                if os.path.exists(alt):
+                    path = alt
+                    break
         if not os.path.exists(path):
             problems.append(f"missing calibration image: {path}")
             continue
@@ -1294,7 +1451,6 @@ def setup_theme(root: tk.Tk) -> Dict[str, Any]:
                     font=fonts['small'])
     style.configure('Treeview.Heading', background=UI['bg'], font=fonts['small_bold'], relief='flat')
     style.configure('TScrollbar', background='#e9ece7', troughcolor=UI['bg'], arrowsize=12)
-    style.configure('TNotebook', background=UI['bg'])
     return fonts
 
 
@@ -1529,8 +1685,7 @@ class ZoomCanvas:
         crop = pad[iy:iy + 2 * hh + 1, ix:ix + 2 * hh + 1]
         big = cv2.resize(crop, (self.LOUPE_SIZE, self.LOUPE_SIZE), interpolation=cv2.INTER_NEAREST)
         self._loupe_photo = ImageTk.PhotoImage(Image.fromarray(big))
-        W, _ = self.size()
-        x, y = W - self.LOUPE_SIZE - 12, 12
+        x, y = 12, 12                                  # top-left: the colour bar lives on the right
         c.create_image(x, y, anchor=tk.NW, image=self._loupe_photo, tags='loupe')
         c.create_rectangle(x, y, x + self.LOUPE_SIZE, y + self.LOUPE_SIZE, outline='white', width=2, tags='loupe')
         mid = self.LOUPE_SIZE / 2
@@ -1843,10 +1998,17 @@ class FitPanel:
         for t, xi, yi in zip(self._targets, x, y):
             cx, cy = px(xi), py(yi)
             c.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill=t.color, outline=UI['text'], width=1.5)
-        c.create_text(L + 6, T + 4, anchor='nw', fill=UI['text'], font=self.fonts['mono_small'],
-                      text=f"y = {fit.slope:.4f} x {'+' if fit.intercept >= 0 else '−'} {abs(fit.intercept):.2f}"
-                           + (f"\nRMSE {fit.rmse:.2f} {self._unit}" if fit.rmse is not None else "\n2 targets: R² = 1 by construction"))
-        c.create_text(W - R, H - 4, anchor='se', text=f"measured {self._unit}", fill=UI['muted'], font=self.fonts['tiny'])
+        eq = (f"y = {fit.slope:.4f} x {'+' if fit.intercept >= 0 else '−'} {abs(fit.intercept):.2f}"
+              + (f"\nRMSE {fit.rmse:.2f} {self._unit}" if fit.rmse is not None else "\n2 targets: R² = 1 by construction"))
+        # the equation sits in the corner the line does not pass through, on a white card
+        if fit.slope >= 0:
+            tid = c.create_text(L + 6, T + 4, anchor='nw', fill=UI['text'], font=self.fonts['mono_small'], text=eq)
+        else:
+            tid = c.create_text(L + 6, H - B - 4, anchor='sw', fill=UI['text'], font=self.fonts['mono_small'], text=eq)
+        bx0, by0, bx1, by1 = c.bbox(tid)
+        card = c.create_rectangle(bx0 - 3, by0 - 2, bx1 + 3, by1 + 2, fill=UI['plot_bg'], outline='')
+        c.tag_raise(tid, card)
+        c.create_text((L + W - R) / 2, H - 4, anchor='s', text=f"measured {self._unit}", fill=UI['muted'], font=self.fonts['tiny'])
         try:
             c.create_text(10, T + 4, anchor='ne', angle=90, text=f"reference {self._unit}", fill=UI['muted'], font=self.fonts['tiny'])
         except tk.TclError:
@@ -1860,7 +2022,7 @@ class FitPanel:
 
 class TimelinePanel:
     """Calibration shots as diamonds, survey images as ticks, the offset b(t) drawn across."""
-    H = 118
+    H = 130
 
     def __init__(self, parent, fonts: Dict[str, Any]):
         self.fonts = fonts
@@ -1925,13 +2087,17 @@ class TimelinePanel:
                 return yb_bot - (b - bmin) / (bmax - bmin) * (yb_bot - yb_top) if bmax > bmin else (yb_top + yb_bot) / 2
             pts = [k for e in fitted for k in (x_of(e.timestamp), y_of(e.fit.intercept))]
             c.create_line(pts, fill=UI['drift'], width=2)
+        last_x = [-1e9, -1e9]
         for e in self.events:
             x = x_of(e.timestamp)
             fill = UI['accent'] if e.fit is not None else UI['panel']
             c.create_polygon(x, mid - 7, x + 7, mid, x, mid + 7, x - 7, mid, fill=fill, outline=UI['accent'], width=2)
             label = f"{e.timestamp:%H:%M:%S}" + (f" · b = {e.fit.intercept:+.2f}" if e.fit is not None and not e.fit.single_point
                                                  else (f" · K = {e.fit.slope:.4g}" if e.fit is not None else " · not fitted"))
-            c.create_text(min(max(x, 60), W - 60), H - 2, anchor='s', text=label, fill=UI['text'], font=self.fonts['tiny'])
+            lx = min(max(x, 60), W - 60)
+            row = 0 if lx - last_x[0] >= 125 else 1          # a second row when labels would overlap
+            last_x[row] = lx
+            c.create_text(lx, H - 2 - 12 * row, anchor='s', text=label, fill=UI['text'], font=self.fonts['tiny'])
         if self.survey:
             c.create_text(10, 2, anchor='nw', text=f"{t0:%H:%M}", fill=UI['muted'], font=self.fonts['tiny'])
             c.create_text(W - 10, 2, anchor='ne', text=f"{t1:%H:%M}", fill=UI['muted'], font=self.fonts['tiny'])
@@ -2076,8 +2242,12 @@ class RegressionPlotDialog:
         fit = event.fit
         self.win = tk.Toplevel(parent)
         self.win.title(title)
-        self.win.geometry("760x640")
+        self.win.geometry("760x700")
         self.win.transient(parent)
+        btns = ttk.Frame(self.win)                 # packed first, at the bottom, so it is never squeezed out
+        btns.pack(side='bottom', fill='x', pady=6)
+        ttk.Button(btns, text="Save plot as PNG", command=self._save_png).pack(side='right', padx=6)
+        ttk.Button(btns, text="Close", command=self.win.destroy).pack(side='right')
         self.fig = Figure(figsize=(7.4, 5.8), dpi=100)
         gs = self.fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.01], hspace=0.08)
         ax = self.fig.add_subplot(gs[0])
@@ -2097,7 +2267,9 @@ class RegressionPlotDialog:
             ax.annotate(t.name, (xi, yi), textcoords="offset points", xytext=(7, 5), fontsize=9)
             axr.bar(xi, ri, width=span * 0.03 + 0.05, color=t.color, edgecolor='black')
         axr.axhline(0, color='black', linewidth=0.8)
-        eq = f"y = {fit.slope:.4f} x + {fit.intercept:.4f}\nR² = {fit.r_squared:.4f}, n = {fit.n}"
+        eq = (f"y = {fit.slope:.4f} x {'+' if fit.intercept >= 0 else '-'} {abs(fit.intercept):.4f}\n"
+              f"R² = {fit.r_squared:.4f}, n = {fit.n}" if fit.r_squared is not None else
+              f"y = {fit.slope:.4f} x {'+' if fit.intercept >= 0 else '-'} {abs(fit.intercept):.4f}\nR² n/a, n = {fit.n}")
         if fit.rmse is not None:
             eq += f"\nRMSE = {fit.rmse:.3f} {unit}, LOO = {fit.loo_rmse:.3f} {unit}" if fit.loo_rmse is not None \
                 else f"\nRMSE = {fit.rmse:.3f} {unit}"
@@ -2113,15 +2285,11 @@ class RegressionPlotDialog:
         axr.set_xlabel(f"Sensor ROI mean ({unit})")
         axr.grid(alpha=0.3)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.win)
-        self.canvas.get_tk_widget().pack(fill='both', expand=True)
         try:
             NavigationToolbar2Tk(self.canvas, self.win).update()
         except Exception:
             pass
-        btns = ttk.Frame(self.win)
-        btns.pack(fill='x', pady=6)
-        ttk.Button(btns, text="Save plot as PNG", command=self._save_png).pack(side='right', padx=6)
-        ttk.Button(btns, text="Close", command=self.win.destroy).pack(side='right')
+        self.canvas.get_tk_widget().pack(fill='both', expand=True)
         self.canvas.draw()
 
     def _save_png(self):
@@ -2285,6 +2453,7 @@ class ThermalCalibrationApp:
         tb.pack(fill=tk.X)
         tb.pack_propagate(False)
         self.image_name_label = tk.Label(tb, text="No image", bg=UI['panel'], fg=UI['text'], font=f['small_bold'])
+        self.image_name_label.pack(side=tk.LEFT, padx=(12, 8))      # packed first: keeps its width
         self.image_info_label = tk.Label(tb, text="", bg=UI['panel'], fg=UI['muted'], font=f['tiny'], anchor='w')
         viz = tk.Frame(tb, bg=UI['panel'], highlightthickness=1, highlightbackground=UI['border'])
         viz.pack(side=tk.RIGHT, padx=(4, 12), pady=7)
@@ -2295,9 +2464,7 @@ class ThermalCalibrationApp:
         zoom.pack(side=tk.RIGHT, padx=4, pady=7)
         ttk.Button(zoom, text="Fit", style='Small.TButton', width=4, command=lambda: self.view.fit_and_redraw()).pack(side=tk.LEFT)
         ttk.Button(zoom, text="1:1", style='Small.TButton', width=4, command=lambda: self.view.one_to_one()).pack(side=tk.LEFT)
-        tk.Label(zoom, textvariable=self.zoom_var, bg=UI['panel'], fg=UI['muted'], font=f['small'], width=6).pack(side=tk.LEFT, padx=4)
-        # labels are packed last so the controls on the right keep their space; the info text gets what is left
-        self.image_name_label.pack(side=tk.LEFT, padx=(12, 8))
+        # the info text is packed last and takes what is left (it is the least important thing on the bar)
         self.image_info_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
         tk.Frame(self.image_view, bg=UI['border'], height=1).pack(fill=tk.X)
         self.view = ZoomCanvas(self.image_view, on_click=self._on_image_click, on_motion=self._on_image_motion,
@@ -2317,6 +2484,7 @@ class ThermalCalibrationApp:
         tk.Label(status, textvariable=self.status_var, bg=UI['panel'], fg=UI['blue'], font=f['small'], anchor='w').pack(side=tk.LEFT, padx=16)
         self.mode_status = tk.Label(status, text="Thermal", bg=UI['panel'], fg=UI['muted'], font=f['small'])
         self.mode_status.pack(side=tk.RIGHT, padx=16)
+        tk.Label(status, textvariable=self.zoom_var, bg=UI['panel'], fg=UI['muted'], font=f['small']).pack(side=tk.RIGHT, padx=8)
 
     def _section(self, parent, title: Optional[str] = None) -> tk.Frame:
         """White card inside a step body."""
@@ -2401,18 +2569,23 @@ class ThermalCalibrationApp:
         er.pack(fill=tk.X)
         ttk.Checkbutton(er, text="Emissivity correction (advanced)", variable=self.emis_enabled, command=self._on_settings_change).pack(side=tk.LEFT)
         help_icon(er, "Usually OFF. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies its "
-                      "own emissivity setting (0.95 by default) when converting R-JPEGs.\n\nWhen ON: panel ROI values are "
-                      "corrected with the panel emissivity before the fit, and survey pixels with the scene emissivity "
-                      "before the coefficients are applied, so both sides of the fit are in the same space. Broadband "
-                      "grey-body approximation:\nT_obj⁴ = (T_app⁴ − (1−ε)·T_sky⁴) / ε", side=tk.LEFT, padx=4)
+                      "own emissivity setting (0.95 by default) when converting R-JPEGs.\n\nWhen ON: the reference readings "
+                      "are converted to the apparent temperature of each panel (through the panel emissivity), the fit maps "
+                      "raw sensor values to those, m and b are applied to the raw survey pixels, and the result is converted "
+                      "to surface temperature with the scene emissivity. Broadband grey-body approximation:\n"
+                      "T_app⁴ = ε·T_obj⁴ + (1−ε)·T_sky⁴", side=tk.LEFT, padx=4)
         ev = tk.Frame(self.emis_frame, bg=UI['bg'])
         ev.pack(fill=tk.X, pady=(4, 0))
-        for text, var in (("Panel ε", self.emis_target_var), ("Scene ε", self.emis_scene_var), ("T_sky °C", self.tsky_var)):
-            tk.Label(ev, text=text, bg=UI['bg'], fg=UI['text'], font=f['small']).pack(side=tk.LEFT, padx=(0, 3))
-            e_ = ttk.Entry(ev, width=6, textvariable=var, justify='right')
-            e_.pack(side=tk.LEFT, padx=(0, 10))
+        for r_, (text, var, lo, hi) in enumerate((("Panel emissivity ε (0.5 to 1)", self.emis_target_var, 0.5, 1.0),
+                                                  ("Scene emissivity ε (0.5 to 1)", self.emis_scene_var, 0.5, 1.0),
+                                                  ("Sky temperature T_sky (°C)", self.tsky_var, -100.0, 60.0))):
+            tk.Label(ev, text=text, bg=UI['bg'], fg=UI['text'], font=f['small'], anchor='w').grid(row=r_, column=0, sticky='w', pady=1)
+            e_ = tk.Entry(ev, width=7, textvariable=var, justify='right', relief='solid', bd=1, bg=UI['panel'],
+                          highlightthickness=0, insertbackground=UI['text'], font=f['mono'])
+            e_.grid(row=r_, column=1, padx=(10, 0), pady=1, sticky='w')
             e_.bind('<FocusOut>', lambda e: self._on_settings_change())
             e_.bind('<Return>', lambda e: self._on_settings_change())
+            var.trace_add('write', lambda *a, e_=e_, var=var, lo=lo, hi=hi: self._validate_setting_entry(e_, var, lo, hi))
         tk.Label(body, text="With 3 or more targets the scatter can be estimated. With 2, R² is 1 by construction "
                             "and nothing can be checked.",
                  bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(10, 0))
@@ -2421,11 +2594,12 @@ class ThermalCalibrationApp:
         f = self.fonts
 
         def field(label, var_entry: bool = True):
-            tk.Label(body, text=label, bg=UI['bg'], fg=UI['muted'], font=f['tiny'], anchor='w').pack(fill=tk.X, pady=(6, 1))
+            tk.Label(body, text=label, bg=UI['bg'], fg=UI['muted'], font=f['tiny'], anchor='w', justify='left',
+                     wraplength=290).pack(fill=tk.X, pady=(6, 1))
             r = tk.Frame(body, bg=UI['bg'])
             r.pack(fill=tk.X)
             return r
-        r = field("Survey folder (all images in it are processed; use the filter to narrow down)")
+        r = field("Survey folder (every image in it; narrow down with the filter)")
         self.survey_entry = ttk.Entry(r)
         self.survey_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.survey_entry.bind('<FocusOut>', lambda e: self._on_survey_changed())
@@ -2545,7 +2719,7 @@ class ThermalCalibrationApp:
             except ValueError:
                 return default
         return EmissivitySettings(self.emis_enabled.get() and self._is_thermal(), f(self.emis_target_var, 0.95),
-                                  f(self.emis_scene_var, 0.98), f(self.tsky_var, -40.0))
+                                  f(self.emis_scene_var, 0.98), f(self.tsky_var, -40.0)).bounded()
 
     def _update_targets_tooltip(self):
         if self._is_thermal():
@@ -2582,6 +2756,15 @@ class ThermalCalibrationApp:
         self._rebuild_target_rows()        # extra targets are hidden in single-point mode, never deleted
         self._recompute_all_fits()
         self._update_display()
+
+    def _validate_setting_entry(self, entry: tk.Entry, var: tk.StringVar, lo: float, hi: float):
+        """Red background when the text is not a number or outside its physical range."""
+        try:
+            v = parse_number(var.get())
+            ok = v is None or lo <= v <= hi
+        except ValueError:
+            ok = False
+        entry.config(bg=UI['panel'] if ok else '#f5b7b1')
 
     def _on_settings_change(self):
         self._recompute_all_fits()
@@ -2620,6 +2803,9 @@ class ThermalCalibrationApp:
             if info.error or not info.is_single_band:
                 rejected.append(f"{os.path.basename(fp)}: {info.describe()}")
                 continue
+            if self._is_thermal() and info.is_8bit:
+                rejected.append(f"{os.path.basename(fp)}: 8-bit integers are a stretched preview, not temperatures")
+                continue
             ts = extract_timestamp(fp)
             ev = CalibrationEvent(fp, ts.value or datetime.now(), ts.source, ts.tz)
             while len(ev.targets) < n_targets:      # targets are shared by all shots
@@ -2627,8 +2813,9 @@ class ThermalCalibrationApp:
             self.calibration_events.append(ev)
             added += 1
         if rejected:
-            messagebox.showwarning("Images skipped", "These files are not single-band temperature/DN images and were "
-                                   "skipped. Colour R-JPEG previews must be converted first (see README):\n\n" + "\n".join(rejected))
+            messagebox.showwarning("Images skipped", "These files cannot serve as calibration images and were skipped. "
+                                   "Colour R-JPEG previews must be converted to temperature TIFFs first (see README):\n\n"
+                                   + "\n".join(rejected))
         if not added:
             return
         self.calibration_events.sort(key=lambda e: e.timestamp)
@@ -2646,11 +2833,24 @@ class ThermalCalibrationApp:
         if self.active_step == 1 and added:
             self.show_step(2)
 
+    def _clear_image_view(self):
+        """No calibration image: empty canvas, labels, table and fit panel."""
+        self.current_image = None
+        self.view.set_image(None)
+        self.zoom_var.set("")
+        self._rebuild_target_rows()
+        self.current_image_label.config(text="No image selected")
+        self.image_name_label.config(text="No image")
+        self.image_info_label.config(text="")
+        self.shot_label.config(text="no shot")
+        self.fit_panel.clear("No calibration image selected")
+
     def _remove_calibration_image(self):
         sel = self.calib_listbox.curselection()
         if not sel:
             return
         self._cancel_drawing(silent=True)
+        removed = os.path.basename(self.calibration_events[sel[0]].image_path)
         del self.calibration_events[sel[0]]
         self._refresh_calib_listbox()
         if self.calibration_events:
@@ -2658,14 +2858,8 @@ class ThermalCalibrationApp:
             self.calib_listbox.selection_set(idx)
             self._load_image(idx)
         else:
-            self.current_image = None
-            self.view.set_image(None)
-            self._rebuild_target_rows()
-            self.current_image_label.config(text="No image selected")
-            self.image_name_label.config(text="No image")
-            self.image_info_label.config(text="")
-            self.shot_label.config(text="no shot")
-            self.fit_panel.clear("No calibration image selected")
+            self._clear_image_view()
+            self.status_var.set(f"Removed {removed}. No calibration images left.")
         self._recompute_all_fits()
         self._update_timeline()
 
@@ -2749,8 +2943,7 @@ class ThermalCalibrationApp:
             closed = flat + flat[:2]
             c.create_line(closed, fill='black', width=5, tags='overlay')
             c.create_line(closed, fill=t.color, width=2, tags='overlay')
-            inner = inner_roi_contour(t.polygon, self.current_image.shape, inset)
-            if inner:
+            for inner in inner_roi_contours(t.polygon, self.current_image.shape, inset):
                 ipts = [v for x, y in inner for v in self.view.to_canvas(x + 0.5, y + 0.5)]
                 c.create_line(ipts + ipts[:2], fill='white', width=1, dash=(4, 3), tags='overlay')
             for x, y in pts:
@@ -2847,7 +3040,7 @@ class ThermalCalibrationApp:
         ev = self._current_event()
         targets = self._visible_targets(ev)
         target = targets[self.active_target_index]
-        target.polygon = list(self.polygon_points)
+        target.polygon = order_corners(self.polygon_points)      # clicks in any order give a simple quad
         st = extract_roi_statistics(self.current_image, target.polygon, self._roi_inset())
         target.drone_mean, target.drone_std, target.pixel_count, target.inset_applied = st.mean, st.std, st.count, st.inset_applied
         self.drawing_polygon = False
@@ -2859,9 +3052,11 @@ class ThermalCalibrationApp:
         self.view.redraw()
         warn = ""
         if st.count < MIN_ROI_PIXELS:
-            warn = f" ⚠ only {st.count} pixels inside the inset; draw it larger or reduce the inset."
+            warn = f" ⚠ only {st.count} pixel{'s' if st.count != 1 else ''} inside the inset; draw it larger or reduce the inset."
         elif not st.inset_applied:
             warn = " ⚠ polygon too small for the edge inset; the full polygon was used."
+        elif not polygon_is_convex(target.polygon):
+            warn = " ⚠ the polygon is not convex; check the corners."
         self.status_var.set(f"T{self.active_target_index + 1}: mean {st.mean:.2f} {self._unit()} over {st.count} px. "
                             f"Now enter its reference value.{warn}")
 
@@ -2964,6 +3159,7 @@ class ThermalCalibrationApp:
         self._rebuild_target_rows()
         self._recompute_all_fits()
         self.view.redraw()
+        self.status_var.set(f"Removed T{index + 1} from all shots; the remaining targets were renumbered.")
 
     def _on_gt_change(self, index: int):
         ev = self._current_event()
@@ -2983,9 +3179,13 @@ class ThermalCalibrationApp:
         self._update_step_summaries()
 
     def _recompute_all_fits(self):
+        warn = None
+        cur = self._current_event()
         for ev in self.calibration_events:
-            recompute_fit(ev, self._is_single_point(), self._is_thermal(), self._emissivity_settings())
-        self._refresh_fit_panel(None)
+            w = recompute_fit(ev, self._is_single_point(), self._is_thermal(), self._emissivity_settings())
+            if ev is cur:
+                warn = w
+        self._refresh_fit_panel(warn)
         self._update_timeline()
         self._update_step_summaries()
 
@@ -3020,7 +3220,8 @@ class ThermalCalibrationApp:
         idx = self.current_event_index
         label = "only" if n == 1 else ("start" if idx == 0 else ("end" if idx == n - 1 else f"mid {idx}"))
         self.fit_panel.update(ev, self._visible_targets(ev), self._unit(), self._fit_warnings(ev, warn),
-                              f"shot {idx + 1}/{n} · {label} · {sum(1 for t in self._visible_targets(ev) if t.is_complete())} targets")
+                              f"shot {idx + 1}/{n} · {label} · {sum(1 for t in self._visible_targets(ev) if t.is_complete())} "
+                              f"target{'s' if sum(1 for t in self._visible_targets(ev) if t.is_complete()) != 1 else ''}")
 
     def _show_regression_plot(self):
         ev = self._current_event()
@@ -3089,6 +3290,8 @@ class ThermalCalibrationApp:
             self.process_view.clear_rows()
             if folder and not os.path.isdir(folder):
                 self.status_var.set("The survey input must be a folder.")
+            elif folder:
+                self.status_var.set(f"No images found in {folder} (calibration shots and earlier outputs are excluded).")
             return
         known = {p: self._survey_timestamps[p] for p in files if p in self._survey_timestamps}
         todo = [p for p in files if p not in known]
@@ -3130,33 +3333,47 @@ class ThermalCalibrationApp:
                   "output_folder": self.output_entry.get(), "copy_metadata": self.copy_meta_var.get(),
                   "skip_existing": self.skip_existing_var.get()}
         return events_to_project(self.calibration_events, self.sensor_mode.get(), self.msi_single_point.get(),
-                                 self._emissivity_settings(), self._roi_inset(), survey, self.project_var.get().strip())
+                                 self._emissivity_settings(), self._roi_inset(), survey, self.project_var.get().strip(),
+                                 os.path.dirname(os.path.abspath(self.project_path)) if self.project_path else None)
 
     def _new_project(self):
         if self.calibration_events and not messagebox.askyesno("New project", "Discard the current targets and fits?"):
             return
         self._cancel_drawing(silent=True)
         self.calibration_events = []
-        self.current_image = None
         self._image_cache, self._display_cache = {}, {}
         self.project_path = None
         self._last_output = None
         self._survey_timestamps = {}
-        self.view.set_image(None)
+        self._survey_scan_id += 1
         self._refresh_calib_listbox()
-        self._rebuild_target_rows()
-        self.fit_panel.clear("No calibration image selected")
-        self.current_image_label.config(text="No image selected")
-        self.image_name_label.config(text="No image")
-        self.image_info_label.config(text="")
-        self.shot_label.config(text="no shot")
+        self._clear_image_view()
+        # settings back to their defaults
+        self.sensor_mode.set(MODE_THERMAL)
+        self.msi_single_point.set(True)
+        self.roi_inset_var.set(DEFAULT_ROI_INSET_PX)
+        self.emis_enabled.set(False)
+        self.emis_target_var.set("0.95")
+        self.emis_scene_var.set("0.98")
+        self.tsky_var.set("-40")
+        self.copy_meta_var.set(True)
+        self.skip_existing_var.set(False)
+        self.filter_var.set("")
+        self.viz_mode.set("inferno")
+        self._on_mode_switch()
         self.project_var.set("untitled project")
         self.saved_var.set("")
         self.survey_entry.delete(0, tk.END)
-        self.process_view.clear_rows()
-        self.process_view.set_preflight(None)
+        self.output_entry.delete(0, tk.END)
+        pv = self.process_view
+        pv.clear_rows()
+        pv.set_preflight(None)
+        pv.progress_var.set(0)
+        pv.progress_label.config(text="Ready")
+        pv.open_btn.state(['disabled'])
         self._update_timeline()
         self._update_step_summaries()
+        self.status_var.set("New project.")
         self.show_step(1)
 
     def _save_project(self, save_as: bool = False):
@@ -3218,6 +3435,8 @@ class ThermalCalibrationApp:
         if events:
             self.calib_listbox.selection_set(0)
             self._load_image(0)
+        else:
+            self._clear_image_view()
         self._recompute_all_fits()
         self.project_var.set(project.get("title") or os.path.basename(path).replace(PROJECT_EXT, "").replace(".json", ""))
         self.saved_var.set(f"opened {datetime.now():%H:%M} · {os.path.basename(path)}")
@@ -3340,18 +3559,24 @@ class ThermalCalibrationApp:
                     if i > 0 and i < n:
                         per = (datetime.now() - t0).total_seconds() / i
                         eta = f" · about {int(per * (n - i)) + 1} s left"
-                    pv.progress_label.config(text=(f"Processing {i} of {n} · {name}" if name else f"{i} of {n}") + eta)
+                    pv.progress_label.config(text=(f"Processing {min(i + 1, n)} of {n} · {name}" if name else f"{i} of {n}") + eta)
                 elif kind == 'row':
                     pv.add_row(msg[1], msg[2])
                 elif kind == 'done':
                     r, out = msg[1], msg[2]
-                    self._last_output = out
-                    pv.progress_label.config(text=f"Done: {r['ok']} ok, {r['errors']} errors, {r['skipped']} skipped")
-                    pv.progress_var.set(100)
                     pv.open_btn.state(['!disabled'])
-                    self.status_var.set(f"Batch complete: {r['ok']} image(s), the log and the project file written to {out}")
+                    if r.get('cancelled'):
+                        self._last_output = None
+                        pv.progress_label.config(text=f"Cancelled after {r['ok'] + r['errors'] + r['skipped']} of {r['total']} images")
+                        self.status_var.set(f"Batch cancelled: {r['ok']} image(s) written to {out}; the rest is not processed.")
+                    else:
+                        self._last_output = out
+                        pv.progress_label.config(text=f"Done: {r['ok']} ok, {r['errors']} errors, {r['skipped']} skipped")
+                        pv.progress_var.set(100)
+                        self.status_var.set(f"Batch complete: {r['ok']} image(s), the log and the project file written to {out}")
                     self._finish_batch()
                 elif kind == 'error':
+                    self._last_output = None
                     pv.log_lines.append("FAILED:\n" + msg[1])
                     pv.progress_label.config(text="Failed: " + msg[1].strip().splitlines()[-1][:80])
                     self.status_var.set("Batch processing failed.")
@@ -3402,10 +3627,13 @@ def main(argv: Optional[List[str]] = None):
     ap.add_argument("--survey", help="survey folder (overrides the project's)")
     ap.add_argument("--output", help="output folder (overrides the project's)")
     ap.add_argument("--filter", help="filename filter (overrides the project's)")
+    ap.add_argument("--version", action="version", version=f"{TOOL_NAME} {__version__}")
     args = ap.parse_args(argv)
     if args.run:
         if not args.project:
             ap.error("--run needs --project")
+        if not os.path.exists(args.project):
+            ap.error(f"project file not found: {args.project}")
         run_project_headless(args.project, args.survey, args.output, args.filter)
         return
     if platform.system() == "Windows":

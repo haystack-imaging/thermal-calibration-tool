@@ -8,8 +8,3 @@ dist/
 # generated / downloaded test data (see tests/README.md)
 tests/data/
 tests/vendor/
-tests/screenshots/work/
-audit/work/
-
-# local working notes (audit with internal context), not published
-notes/

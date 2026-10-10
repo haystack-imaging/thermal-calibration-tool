@@ -20,7 +20,7 @@ A clear description, and what you expected instead.
 - If possible, attach one calibration image (single-band TIFF) and the reference readings you entered.
 
 **Environment**
-- Tool version: (Help → About, or `thermal_calibration_tool.py` header)
+- Tool version: (Help → About)
 - OS and Python version:
 - exiftool installed: yes / no
 
