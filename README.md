@@ -5,9 +5,10 @@
 
 A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
 
-Version 0.2.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`); the GUI has been exercised on synthetic flights and real DJI M4T frames.
+Version 0.2.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`); the GUI has been exercised on synthetic flights and real DJI M4T flights.
 
 ![Targets step with the live fit panel](GUI_screenshots/GUI_Home.png)
+
 
 ## Why
 
@@ -149,9 +150,9 @@ Switch **Sensor** to Multispectral for single-band reflectance calibration witho
 
 ## Field protocol (short)
 
-- 3 targets of clearly different temperature, each at least 10 to 15 px wide in the calibration shot (fly lower for that shot).
-- Measure every target with the IR gun within a minute of the drone shot; write the readings down with the time.
-- Repeat at the end of the flight if drift matters (long flights, changing weather).
+- 3 targets of clearly different temperature, each at least 10 to 15 px wide in the calibration shot (fly lower for that shot, or hold the drone over the panels as in the screenshots).
+- Measure every target with the IR gun within a minute of the drone shot; write the readings down with the time. Note the gun's emissivity setting.
+- Repeat at the end of the flight if drift matters (long flights, changing weather). A second shot taken mid-flight still helps: images after it get its coefficients, and the pre-flight check says how many that are.
 - Keep the camera's clock right; capture times drive the interpolation.
 
 ## Tests and test data

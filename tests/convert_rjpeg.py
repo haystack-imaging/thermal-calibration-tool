@@ -35,3 +35,7 @@ for jpg in sorted(glob.glob(os.path.join(a.in_dir, "*_R.JP*G")) + glob.glob(os.p
         d.write(temp, 1)
     subprocess.run(["exiftool", "-overwrite_original", "-q", "-tagsFromFile", jpg, "-all:all", "-xmp", out], check=True)
     print(f"{os.path.basename(jpg)} -> {os.path.basename(out)}  {temp.min():.1f}..{temp.max():.1f} C  params={used}")
+
+# The DJI library crashes while the interpreter unloads it; everything is written and flushed by now.
+sys.stdout.flush()
+os._exit(0)
