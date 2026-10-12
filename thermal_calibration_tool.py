@@ -2139,18 +2139,18 @@ class TimelinePanel:
         top = tk.Frame(self.frame, bg=UI['panel'])
         top.pack(fill=tk.X, padx=14, pady=(7, 2))
         tk.Label(top, text="Flight timeline", bg=UI['panel'], fg=UI['text'], font=fonts['small_bold']).pack(side=tk.LEFT)
-        for text, kind in (("calibration shot", 'diamond'), ("survey image", 'tick'), ("offset b(t)", 'line')):
+        for text, kind in (("calibration shot", 'diamond'), ("survey image", 'tick'),
+                           ("outside the window", 'tick_out'), ("offset b(t)", 'line')):
             lg = tk.Canvas(top, width=16, height=12, bg=UI['panel'], highlightthickness=0)
             lg.pack(side=tk.LEFT, padx=(14, 4))
             if kind == 'diamond':
                 lg.create_polygon(8, 1, 15, 6, 8, 11, 1, 6, fill=UI['accent'], outline='')
-            elif kind == 'tick':
-                lg.create_rectangle(7, 1, 9, 11, fill=UI['tick'], outline='')
+            elif kind in ('tick', 'tick_out'):
+                lg.create_rectangle(7, 1, 9, 11, fill=UI[kind], outline='')
             else:
                 lg.create_line(0, 6, 16, 6, fill=UI['drift'], width=2)
             tk.Label(top, text=text, bg=UI['panel'], fg=UI['muted'], font=fonts['tiny']).pack(side=tk.LEFT)
-        self.summary = tk.Label(top, text="", bg=UI['panel'], fg=UI['muted'], font=fonts['tiny'], anchor='e')
-        self.summary.pack(side=tk.RIGHT)
+        self.summary_text = ""                  # drawn on the canvas, where it cannot collide with the legend
         self.canvas = tk.Canvas(self.frame, bg=UI['bg'], highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=14, pady=(2, 8))
         self.canvas.bind('<Configure>', lambda e: self.redraw())
@@ -2160,7 +2160,7 @@ class TimelinePanel:
     def set_data(self, events: List[CalibrationEvent], survey: List[Tuple[datetime, bool]], summary: str = ""):
         self.events = sorted(events, key=lambda e: e.timestamp)
         self.survey = survey
-        self.summary.config(text=summary)
+        self.summary_text = summary
         self.redraw()
 
     def redraw(self):
@@ -2170,7 +2170,8 @@ class TimelinePanel:
         H = max(c.winfo_height(), 40)
         times = [e.timestamp for e in self.events] + [t for t, _ in self.survey]
         if not times:
-            c.create_text(W / 2, H / 2, text="Add calibration images; survey images appear here once chosen in step 4.",
+            c.create_text(W / 2, H / 2, text="Calibration shots appear here as diamonds, survey images as ticks once the "
+                                             "survey folder is chosen in 3 · Process.",
                           fill=UI['muted'], font=self.fonts['tiny'])
             return
         t0, t1 = min(times), max(times)
@@ -2205,9 +2206,8 @@ class TimelinePanel:
             row = 0 if lx - last_x[0] >= 125 else 1          # a second row when labels would overlap
             last_x[row] = lx
             c.create_text(lx, H - 2 - 12 * row, anchor='s', text=label, fill=UI['text'], font=self.fonts['tiny'])
-        if self.survey:
-            c.create_text(10, 2, anchor='nw', text=f"{t0:%H:%M}", fill=UI['muted'], font=self.fonts['tiny'])
-            c.create_text(W - 10, 2, anchor='ne', text=f"{t1:%H:%M}", fill=UI['muted'], font=self.fonts['tiny'])
+        if self.summary_text:
+            c.create_text(W / 2, 2, anchor='n', text=self.summary_text, fill=UI['muted'], font=self.fonts['tiny'])
 
 
 # =============================================================================
@@ -2592,7 +2592,9 @@ class ThermalCalibrationApp:
         self.view = ZoomCanvas(self.image_view, on_click=self._on_image_click, on_motion=self._on_image_motion,
                                on_overlay=self._draw_overlay, on_view_change=self._on_view_change)
         self.view.canvas.pack(fill=tk.BOTH, expand=True)
-        self.timeline = TimelinePanel(self.image_view, f)
+        # the timeline belongs to the centre column, not to the image view: it stays visible in every step, so the
+        # pre-flight warnings about images outside the calibration window have their picture right there
+        self.timeline = TimelinePanel(self.center, f)
         self.timeline.frame.pack(fill=tk.X, side=tk.BOTTOM)
         self.process_view = ProcessView(self.center, f, self._run_preflight, self._start_batch_processing, self._cancel_batch,
                                         self._open_output_folder)
@@ -2990,7 +2992,8 @@ class ThermalCalibrationApp:
             return ("Fix the problems listed in the pre-flight check (centre), then press Run.", "", None)
         n = len(rep.files)
         return (f"{n} image{'s' if n != 1 else ''} ready. Press Run.",
-                "Warnings are listed in the pre-flight check; the results table shows every image as it is written.",
+                "The timeline below shows where the survey images lie relative to the calibration shots; orange ticks "
+                "are outside the window and get the nearest shot's coefficients unchanged.",
                 ("Run", self._start_batch_processing))
 
     def _update_guidance(self):
@@ -3666,7 +3669,7 @@ class ThermalCalibrationApp:
             t0, t1 = min(t for t, _ in survey), max(t for t, _ in survey)
             summary = f"{len(survey)} images · {t0:%H:%M} to {t1:%H:%M}"
             if len(fitted) > 1 and (before or after):
-                summary += f" · {before} before / {after} after the calibration window"
+                summary += f" · {before} before / {after} after the window"
         self.timeline.set_data(self.calibration_events, survey, summary)
 
     def _on_survey_changed(self):

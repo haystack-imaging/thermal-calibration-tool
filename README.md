@@ -128,7 +128,8 @@ extrapolation beyond the target span). **Detailed plot** opens a matplotlib wind
 writes a self-contained HTML report for a methods section. With two targets R² is 1 by construction and no
 scatter can be estimated; three or more give the uncertainty figures.
 
-The timeline under the image shows the calibration shots as diamonds, the survey images as ticks (orange
+The timeline under the centre view, visible in every step, shows the calibration shots as diamonds, the
+survey images as ticks (orange
 when outside the calibration window) and the offset b(t) that will be interpolated.
 
 ![Flight timeline](GUI_screenshots/GUI_Timeline.png)

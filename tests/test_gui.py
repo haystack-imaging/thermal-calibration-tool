@@ -89,8 +89,13 @@ def test_timeline_gets_survey_scan(app, tmp_path):
     app.survey_entry.insert(0, str(sur))
     app._on_survey_changed()
     assert pump(app.root, lambda: len(app._survey_timestamps) == 4)
-    assert len(app.timeline.survey) == 4 and "4 images" in app.timeline.summary.cget("text")
+    assert len(app.timeline.survey) == 4 and "4 images" in app.timeline.summary_text
     assert app.timeline.events and app.timeline.canvas.find_all()
+    assert app.timeline.frame.master is app.center, "the timeline is part of the centre column, not of the image view"
+    app.show_step(3)
+    assert app.timeline.frame.winfo_manager() == "pack" and not app.image_view.winfo_manager(), "visible in Process too"
+    app.show_step(2)
+    assert app.timeline.frame.winfo_manager() == "pack" and app.image_view.winfo_manager()
     assert "4 survey images, not processed yet" in app.steps[3].summary.cget("text")
     rows = app.process_view.tree.get_children()
     assert len(rows) == 4 and app.process_view.tree.item(rows[0])["values"][-1] == "not processed", "listed before any run"

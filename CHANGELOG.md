@@ -69,6 +69,8 @@ should re-run it; the cases below say when the old output was affected.
   time is reported instead of silently ignored. The "all done" guidance asks whether the images show more
   panels (+ Add target) and offers "Open 3 · Process". × removes a target down to the last one (the last row's
   × is greyed out) instead of silently refusing at two; Draw, Clear and × have tooltips.
+- The flight timeline is part of the centre column, so it stays visible in the Process step next to the
+  pre-flight warnings it illustrates; its legend names the orange "outside the calibration window" tick.
 - The Process step has a guidance card too (calibration incomplete → survey folder → ready, with a Run button → done,
   with an Open-folder button), and the empty results table says what to do instead of staying blank.
 - Double-click launchers `Launch.bat` (Windows), `Launch.command` (macOS) and `Launch.sh` (Linux), all running
