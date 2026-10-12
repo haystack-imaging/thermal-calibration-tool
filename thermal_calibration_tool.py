@@ -253,7 +253,7 @@ class CalibrationEvent:
         self.targets.append(target)
         return target
 
-    def remove_target(self, index: int, min_targets: int = 2) -> bool:
+    def remove_target(self, index: int, min_targets: int = 1) -> bool:
         if len(self.targets) <= min_targets or not (0 <= index < len(self.targets)):
             return False
         self.targets.pop(index)
@@ -1837,6 +1837,9 @@ class TargetRowWidget:
         self.gt_entry.bind('<KP_Enter>', lambda e: self.on_enter(self.index) if self.on_enter else None)
         self.remove_btn = ttk.Button(row, text="×", width=2, style='Small.TButton', command=lambda: on_remove(self.index))
         self.remove_btn.pack(side=tk.RIGHT, padx=2)
+        ToolTip(self.draw_btn, "Draw this target's polygon on the current shot: click its 4 corners.")
+        ToolTip(self.clear_btn, "Remove this target's polygon on the current shot; the row stays.")
+        ToolTip(self.remove_btn, "Remove this target from every shot (the last target cannot be removed).")
         # line 2: ROI statistics, full width so they are never cut off
         self.stats_label = tk.Label(self.frame, text="–", bg=UI['panel'], fg=UI['muted'], font=fonts.get('mono_small'), anchor='w')
         self.stats_label.pack(fill=tk.X, padx=(34, 6), pady=(0, 4))
@@ -2208,6 +2211,9 @@ class ProcessView:
     COLUMNS = (('image', 'Image', 230, 'w'), ('ts', 'Time · source', 120, 'w'), ('m', 'm', 64, 'e'), ('b', 'b', 64, 'e'),
                ('min', 'mean in', 64, 'e'), ('mout', 'mean out', 68, 'e'), ('u', '± 1σ', 52, 'e'), ('status', 'Status', 90, 'w'))
 
+    HINT_NO_FOLDER = ("Nothing to process yet.\n\nChoose the survey folder on the left (Browse): every image in it is "
+                      "listed here, checked, and calibrated when you press Run.")
+
     def __init__(self, parent, fonts: Dict[str, Any], on_check, on_run, on_cancel, on_open_folder):
         self.fonts = fonts
         self.frame = tk.Frame(parent, bg=UI['bg'])
@@ -2264,6 +2270,9 @@ class ProcessView:
         self.tree.configure(yscrollcommand=sb.set)
         sb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(fill=tk.BOTH, expand=True)
+        self.placeholder = tk.Label(tf, text="", bg=UI['panel'], fg=UI['muted'], font=fonts['small'], justify='center',
+                                    wraplength=420)
+        self.set_hint(self.HINT_NO_FOLDER)
         self.tree.tag_configure('ok', foreground=UI['text'])
         self.tree.tag_configure('warn', foreground=UI['warn'])
         self.tree.tag_configure('err', foreground=UI['block'])
@@ -2276,7 +2285,7 @@ class ProcessView:
         t.config(state=tk.NORMAL)
         t.delete(1.0, tk.END)
         if rep is None:
-            self.pf_counts.config(text="not run yet")
+            self.pf_counts.config(text="waiting for the survey folder")
         else:
             sym = {'ok': '✓ ', 'warn': '⚠ ', 'block': '✗ '}
             for level, text in rep.lines:
@@ -2286,11 +2295,20 @@ class ProcessView:
                                   fg=UI['block'] if n['block'] else (UI['warn'] if n['warn'] else UI['ok']))
         t.config(state=tk.DISABLED)
 
-    def clear_rows(self):
+    def set_hint(self, text: Optional[str]):
+        """Text over the empty results table saying what to do next; None hides it."""
+        if text:
+            self.placeholder.config(text=text)
+            self.placeholder.place(relx=0.5, rely=0.4, anchor='center')
+        else:
+            self.placeholder.place_forget()
+
+    def clear_rows(self, hint: Optional[str] = None):
         for i in self.tree.get_children():
             self.tree.delete(i)
         self._items = {}
         self.log_lines = []
+        self.set_hint(hint or self.HINT_NO_FOLDER)
 
     def set_pending(self, files: List[Path], timestamps: Dict[Path, Timestamp]):
         """List every image that will be processed, greyed out, before anything runs."""
@@ -2300,6 +2318,8 @@ class ProcessView:
             when = f"{ts.value:%H:%M:%S} · {ts.source}" if ts and ts.value else ""
             self._items[p.name] = self.tree.insert('', tk.END, values=(p.name, when, "", "", "", "", "", "not processed"),
                                                    tags=('pending',))
+        if files:
+            self.set_hint(None)
 
     def add_row(self, row: dict, unit_key: str):
         """Fill in (or append) the row of a finished image."""
@@ -2316,6 +2336,7 @@ class ProcessView:
                   f(row.get(f'original_mean_{unit_key}'), 2), f(row.get(f'calibrated_mean_{unit_key}'), 2),
                   f(row.get('u_fit_1sigma'), 2), shown)
         name = str(row.get('input_filename', ''))
+        self.set_hint(None)
         if name in self._items and self.tree.exists(self._items[name]):
             self.tree.item(self._items[name], values=values, tags=(tag,))
             self.tree.see(self._items[name])
@@ -2585,8 +2606,42 @@ class ThermalCalibrationApp:
         card.pack(fill=tk.X)
         return card
 
+    def _guide_card(self, parent) -> Tuple[tk.Frame, tk.Label, tk.Label, ttk.Button]:
+        """The green NEXT card of a step: headline, an optional detail line and an optional button that
+        opens the step to go to. First-time users read this, not the manual."""
+        f = self.fonts
+        card = tk.Frame(parent, bg=UI['accent_soft'], highlightthickness=1, highlightbackground=UI['accent'])
+        card.pack(fill=tk.X, pady=(2, 8))
+        tk.Label(card, text="NEXT", bg=UI['accent_soft'], fg=UI['accent'], font=f['tiny'], anchor='w').pack(fill=tk.X, padx=10, pady=(6, 0))
+        label = tk.Label(card, text="", bg=UI['accent_soft'], fg=UI['text'], font=f['small_bold'], justify='left', anchor='w', wraplength=270)
+        label.pack(fill=tk.X, padx=10, pady=(0, 2))
+        detail = tk.Label(card, text="", bg=UI['accent_soft'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=270)
+        detail.pack(fill=tk.X, padx=10, pady=(0, 6))
+        btn = ttk.Button(card, text="", style='Accent.TButton')
+        return card, label, detail, btn
+
+    def _set_guide(self, label: tk.Label, detail: tk.Label, btn: ttk.Button, head: str, text: str,
+                   action: Optional[Tuple[str, Callable[[], None]]]):
+        label.config(text=head)
+        detail.config(text=text)
+        if text:
+            if not detail.winfo_manager():
+                detail.pack(fill=tk.X, padx=10, pady=(0, 6), after=label)
+        else:
+            detail.pack_forget()
+        if action:
+            btn.config(text=action[0], command=action[1])
+            if not btn.winfo_manager():
+                btn.pack(anchor='w', padx=10, pady=(0, 8))
+        else:
+            btn.pack_forget()
+
+    def _open_step_action(self, n: int) -> Tuple[str, Callable[[], None]]:
+        return (f"Open {n} · {self.STEP_TITLES[n]} ›", lambda: self.show_step(n))
+
     def _build_step_images(self, body):
         f = self.fonts
+        self.images_guide_card, self.images_guide_label, self.images_guide_detail, self.images_guide_btn = self._guide_card(body)
         # sensor type first: it decides what the images and the reference values mean, so it is chosen
         # before any image is loaded and locked afterwards (File › New project unlocks it)
         self.sensor_box = tk.Frame(body, bg=UI['bg'])
@@ -2636,16 +2691,7 @@ class ThermalCalibrationApp:
     def _build_step_targets(self, body):
         f = self.fonts
         # the guidance card: always states the one thing to do next (first-time users read this, not the manual)
-        self.guide_card = tk.Frame(body, bg=UI['accent_soft'], highlightthickness=1, highlightbackground=UI['accent'])
-        self.guide_card.pack(fill=tk.X, pady=(2, 8))
-        self.guide_kicker = tk.Label(self.guide_card, text="NEXT", bg=UI['accent_soft'], fg=UI['accent'], font=f['tiny'], anchor='w')
-        self.guide_kicker.pack(fill=tk.X, padx=10, pady=(6, 0))
-        self.guide_label = tk.Label(self.guide_card, text="", bg=UI['accent_soft'], fg=UI['text'], font=f['small_bold'],
-                                    justify='left', anchor='w', wraplength=270)
-        self.guide_label.pack(fill=tk.X, padx=10, pady=(0, 2))
-        self.guide_detail = tk.Label(self.guide_card, text="", bg=UI['accent_soft'], fg=UI['muted'], font=f['tiny'],
-                                     justify='left', anchor='w', wraplength=270)
-        self.guide_detail.pack(fill=tk.X, padx=10, pady=(0, 6))
+        self.guide_card, self.guide_label, self.guide_detail, self.guide_btn = self._guide_card(body)
         nav = tk.Frame(body, bg=UI['bg'])
         nav.pack(fill=tk.X, pady=(2, 6))
         ttk.Button(nav, text="‹", style='Small.TButton', width=2, command=lambda: self._step_image(-1)).pack(side=tk.LEFT)
@@ -2722,6 +2768,7 @@ class ThermalCalibrationApp:
 
     def _build_step_process(self, body):
         f = self.fonts
+        self.process_guide_card, self.process_guide_label, self.process_guide_detail, self.process_guide_btn = self._guide_card(body)
 
         def field(label, var_entry: bool = True):
             tk.Label(body, text=label, bg=UI['bg'], fg=UI['muted'], font=f['tiny'], anchor='w', justify='left',
@@ -2824,11 +2871,28 @@ class ThermalCalibrationApp:
         self.mode_lock_icon.unbind("<Leave>")
         ToolTip(self.mode_lock_icon, text)
 
-    def _next_action(self) -> Tuple[str, str, Optional[int], Optional[int]]:
-        """What a user has to do next in step 2: (headline, detail, target index to highlight, shot index)."""
+    def _next_action_images(self) -> Tuple[str, str, Optional[int]]:
+        """What a user has to do next in step 1: (headline, detail, step to open next)."""
+        n = len(self.calibration_events)
+        files = ("Single-band temperature TIFFs; convert DJI R-JPEGs first (see README)." if self._is_thermal() else
+                 "Single-band images of the band you calibrate, one band at a time.")
+        if n == 0:
+            return ("Choose the sensor type, then press Add images… and pick the shots that show your reference targets.",
+                    files + " Usually one shot before and one after the survey.", None)
+        if n == 1:
+            return ("1 shot loaded. Add the other calibration shots of this flight (e.g. the one taken after the survey), "
+                    "then open 2 · Targets.",
+                    "One shot is enough for a flight; a second one at the end also corrects drift. Shots are sorted by "
+                    "capture time.", 2)
+        return (f"{n} shots loaded. Add any further calibration shots of this flight, then open 2 · Targets.",
+                "Shots are sorted by capture time; the coefficients are interpolated between them during the flight.", 2)
+
+    def _next_action(self) -> Tuple[str, str, Optional[int], Optional[int], Optional[int]]:
+        """What a user has to do next in step 2: (headline, detail, target index to highlight, shot index,
+        step to open next)."""
         evs = self.calibration_events
         if not evs:
-            return ("Add calibration images in 1 · Images.", "Then draw the targets here.", None, None)
+            return ("Add calibration images in 1 · Images.", "Then draw the targets here.", None, None, 1)
         ev = self._current_event()
         i = self.current_event_index
         n = len(evs)
@@ -2841,48 +2905,84 @@ class ThermalCalibrationApp:
             k = len(self.polygon_points)
             return (f"Click corner {k + 1} of 4 for {target_label(self.active_target_index, t.name)}.",
                     "Any order; the loupe top-left magnifies the pixels under the cursor. Esc cancels.",
-                    self.active_target_index, i)
+                    self.active_target_index, i, None)
         for j, t in enumerate(targets):        # one target at a time: draw it, then type its reading
             if not t.has_polygon():
                 return (f"Draw {target_label(j, t.name)} on {shot}: press Draw, then click the 4 corners of the panel.",
                         "Zoom in with the mouse wheel first so the panel is large; the dashed outline is the region used.",
-                        j, i)
+                        j, i, None)
             if t.drone_mean is None or not math.isfinite(t.drone_mean):
                 return (f"{target_label(j, t.name)} lies outside the image or over empty pixels: press Draw and redraw it.",
-                        "", j, i)
+                        "", j, i, None)
             if t.ground_truth is None or not math.isfinite(t.ground_truth):
                 return (f"Type {value} for {target_label(j, t.name)} into the {unit} field.",
                         "Comma or dot. Enter jumps to the next field." if self._is_thermal() else
-                        "e.g. 50 % → 0.5. Enter jumps to the next field.", j, i)
+                        "e.g. 50 % → 0.5. Enter jumps to the next field.", j, i, None)
         need = 1 if self._is_single_point() else 2
-        if len(targets) < need:
-            return ("Press + Add target: at least 2 targets are needed for a line.", "", None, i)
+        k_done = len(targets)
+        done = f"{k_done} target{'s' if k_done != 1 else ''}"
+        if k_done < need:
+            return ("Press + Add target: at least 2 targets are needed for a line.", "", None, i, None)
         todo = [k for k, e in enumerate(evs) if k != i and not all(t.is_complete() for t in self._visible_targets(e))]
         if todo:
             k = todo[0]
-            return (f"Shot {i + 1} is done. Press › and draw the same targets on shot {k + 1}.",
+            return (f"Shot {i + 1} is done ({done}). Press › and draw the same targets on shot {k + 1}.",
                     "Each shot needs its own polygons and readings: the panels and their temperatures change "
-                    "between shots. Copy to other shots helps when the camera did not move.", None, k)
+                    "between shots. More panels in the image? + Add target adds a target to every shot. "
+                    "Copy to other shots helps when the camera did not move.", None, k, None)
         if n == 1:
-            return ("All targets are done. Check the fit on the right, then open 4 · Process.",
+            return (f"{done} done on the shot. More panels in the image? Press + Add target. If not, check the fit "
+                    "on the right, then open 4 · Process.",
                     "A single shot is fine: its coefficients are applied to the whole flight. Add a second "
-                    "(end-of-flight) shot in 1 · Images to correct drift.", None, i)
-        return ("All shots are done. Check the fits on the right, then open 4 · Process.",
-                "Switch shots with ‹ › to compare their fits; the timeline below the image shows the drift.", None, i)
+                    "(end-of-flight) shot in 1 · Images to correct drift.", None, i, 4)
+        return (f"All {n} shots done, {done} each. More panels in the images? Press + Add target. If not, check the "
+                "fits on the right, then open 4 · Process.",
+                "Switch shots with ‹ › to compare their fits; the timeline below the image shows the drift.", None, i, 4)
+
+    def _next_action_process(self) -> Tuple[str, str, Optional[Tuple[str, Callable[[], None]]]]:
+        """What a user has to do next in step 4: (headline, detail, button)."""
+        evs = self.calibration_events
+        if not evs:
+            return ("Add the calibration images first.", "", self._open_step_action(1))
+        if any(e.fit is None for e in evs):
+            return ("Finish the targets first: every calibration shot needs a complete fit.", "", self._open_step_action(2))
+        if self._batch_thread and self._batch_thread.is_alive():
+            return ("Calibrating… the results table fills up as the images are written.",
+                    "Cancel stops after the current image.", None)
+        folder = self.survey_entry.get().strip()
+        if not folder:
+            return ("Choose the survey folder: press Browse. Every image in it is calibrated.",
+                    "The outputs go to <survey folder>/calibrated unless you pick another output folder. The filename "
+                    "filter narrows the set down (e.g. _T_deg).", ("Browse…", self._browse_survey_folder))
+        if self._last_output:
+            return (f"Done. The calibrated images, the log and the project file are in {os.path.basename(self._last_output)}.",
+                    "Choose another survey folder to process the next flight.", ("Open output folder", self._open_output_folder))
+        if getattr(self, '_survey_scanning', False):
+            return ("Reading the capture times of the survey images…", "The pre-flight check runs when that is done.", None)
+        rep = self._last_preflight
+        if rep is None:
+            return ("No images to process in this folder. Choose another survey folder or clear the filename filter.",
+                    "", ("Browse…", self._browse_survey_folder))
+        if rep.blocking:
+            return ("Fix the problems listed in the pre-flight check (centre), then press Run.", "", None)
+        n = len(rep.files)
+        return (f"{n} image{'s' if n != 1 else ''} ready. Press Run.",
+                "Warnings are listed in the pre-flight check; the results table shows every image as it is written.",
+                ("Run", self._start_batch_processing))
 
     def _update_guidance(self):
-        if not hasattr(self, 'guide_label'):
+        if not hasattr(self, 'process_guide_label'):
             return
-        head, detail, t_idx, _ = self._next_action()
-        self.guide_label.config(text=head)
-        self.guide_detail.config(text=detail)
-        if detail:
-            if not self.guide_detail.winfo_manager():
-                self.guide_detail.pack(fill=tk.X, padx=10, pady=(0, 6))
-        else:
-            self.guide_detail.pack_forget()
+        head, detail, t_idx, _, nxt = self._next_action()
+        self._set_guide(self.guide_label, self.guide_detail, self.guide_btn, head, detail,
+                        self._open_step_action(nxt) if nxt else None)
         for j, row in enumerate(self.target_rows):
             row.set_highlight(j == t_idx)
+        head, detail, nxt = self._next_action_images()
+        self._set_guide(self.images_guide_label, self.images_guide_detail, self.images_guide_btn, head, detail,
+                        self._open_step_action(nxt) if nxt else None)
+        head, detail, action = self._next_action_process()
+        self._set_guide(self.process_guide_label, self.process_guide_detail, self.process_guide_btn, head, detail, action)
 
     def _on_gt_enter(self, index: int):
         """Enter in a reading field: next target's field, or leave the field when it was the last one."""
@@ -3031,12 +3131,14 @@ class ThermalCalibrationApp:
 
     def _add_calibration_images(self, filepaths: List[str]):
         self._cancel_drawing(silent=True)
-        rejected, added = [], 0
+        rejected, duplicates, added = [], [], 0
         existing = {os.path.abspath(e.image_path) for e in self.calibration_events}
         n_targets = max((len(e.targets) for e in self.calibration_events), default=2)
         for fp in filepaths:
-            if os.path.abspath(fp) in existing:
+            if os.path.abspath(fp) in existing:         # the same file chosen again (a common slip)
+                duplicates.append(os.path.basename(fp))
                 continue
+            existing.add(os.path.abspath(fp))
             info = inspect_image(fp)
             if info.error or not info.is_single_band:
                 rejected.append(f"{os.path.basename(fp)}: {info.describe()}")
@@ -3050,11 +3152,17 @@ class ThermalCalibrationApp:
                 ev.add_target()
             self.calibration_events.append(ev)
             added += 1
+        notes = []
+        if duplicates:
+            notes.append(f"Already in the list, not added a second time ({len(duplicates)}):\n" + "\n".join(duplicates))
         if rejected:
-            messagebox.showwarning("Images skipped", "These files cannot serve as calibration images and were skipped. "
-                                   "Colour R-JPEG previews must be converted to temperature TIFFs first (see README):\n\n"
-                                   + "\n".join(rejected))
+            notes.append("These files cannot serve as calibration images and were skipped. Colour R-JPEG previews must "
+                         "be converted to temperature TIFFs first (see README):\n" + "\n".join(rejected))
+        if notes:
+            messagebox.showwarning("Images skipped", "\n\n".join(notes))
         if not added:
+            if duplicates and not rejected:
+                self.status_var.set(f"Nothing added: {len(duplicates)} image(s) were loaded already.")
             return
         self.calibration_events.sort(key=lambda e: e.timestamp)
         self._refresh_calib_listbox()
@@ -3067,9 +3175,8 @@ class ThermalCalibrationApp:
         if mtime:
             self.status_var.set(f"⚠ {len(mtime)} image(s) have no capture time in their metadata; the file date is used.")
         else:
-            self.status_var.set(f"{len(self.calibration_events)} calibration image(s) loaded.")
-        if self.active_step == 1 and added:
-            self.show_step(2)
+            self.status_var.set(f"{len(self.calibration_events)} calibration image(s) loaded. Add every calibration shot "
+                                "of the flight, then open 2 · Targets.")
 
     def _clear_image_view(self):
         """No calibration image: empty canvas, labels, table and fit panel."""
@@ -3378,6 +3485,8 @@ class ThermalCalibrationApp:
             row.set_name(t.name)
             row.set_ground_truth(t.ground_truth)
             row.set_stats(t, unit)
+        for row in self.target_rows:                    # the last target cannot be removed, only cleared
+            row.remove_btn.state(['disabled'] if len(targets) <= 1 else ['!disabled'])
 
     def _refresh_rows_stats(self):
         ev = self._current_event()
@@ -3409,19 +3518,20 @@ class ThermalCalibrationApp:
         if ev is None:
             return
         self._cancel_drawing(silent=True)
-        if len(ev.targets) <= 2:
-            self.status_var.set("At least 2 targets are needed.")
+        if len(ev.targets) <= 1 or not (0 <= index < len(ev.targets)):
+            self.status_var.set("The last target stays; Clear removes its polygon.")
             return
+        label = target_label(index, ev.targets[index].name)
         drawn = sum(1 for e in self.calibration_events if index < len(e.targets) and e.targets[index].has_polygon())
         if drawn and not messagebox.askyesno("Remove target",
-                                             f"T{index + 1} has a polygon on {drawn} shot(s). Remove it from all shots?"):
+                                             f"{label} has a polygon on {drawn} shot(s). Remove it from all shots?"):
             return
         for e in self.calibration_events:
-            e.remove_target(index, min_targets=2)
+            e.remove_target(index, min_targets=1)
         self._rebuild_target_rows()
         self._recompute_all_fits()
         self.view.redraw()
-        self.status_var.set(f"Removed T{index + 1} from all shots; the remaining targets were renumbered.")
+        self.status_var.set(f"Removed {label} from all shots; the remaining targets were renumbered.")
 
     def _on_gt_change(self, index: int):
         ev = self._current_event()
@@ -3542,14 +3652,23 @@ class ThermalCalibrationApp:
         folder = self.survey_entry.get().strip()
         files = collect_survey_files(folder, None, self.filter_var.get().strip(),
                                      [e.image_path for e in self.calibration_events])
+        key = (folder, self.filter_var.get().strip())
+        if key != getattr(self, '_survey_key', None):   # another folder or filter: earlier results no longer apply
+            self._survey_key = key
+            self._last_output = None
+            self._last_preflight = None
         self._survey_scan_id += 1
         scan_id = self._survey_scan_id
+        self._survey_scanning = False
         if not files:
             self._survey_timestamps = {}
+            self.process_view.set_preflight(None)
+            self.process_view.clear_rows(ProcessView.HINT_NO_FOLDER if not folder else
+                                         "The survey input must be a folder." if not os.path.isdir(folder) else
+                                         "No images found in this folder (calibration shots and earlier outputs are "
+                                         "excluded).\nChoose another survey folder or clear the filename filter.")
             self._update_timeline()
             self._update_step_summaries()
-            self.process_view.set_preflight(None)
-            self.process_view.clear_rows()
             if folder and not os.path.isdir(folder):
                 self.status_var.set("The survey input must be a folder.")
             elif folder:
@@ -3569,11 +3688,14 @@ class ThermalCalibrationApp:
                     return
                 result[p] = extract_timestamp(str(p))
             self._q.put(('survey_scan', scan_id, result))
+        self._survey_scanning = True
         threading.Thread(target=worker, daemon=True).start()
         self.status_var.set(f"Reading capture times of {len(todo)} survey image(s)…")
+        self._update_guidance()
 
     def _after_survey_scan(self):
         """Capture times are known: update the timeline, run the pre-flight check and list the images."""
+        self._survey_scanning = False
         self._update_timeline()
         if self._batch_thread and self._batch_thread.is_alive():
             return
@@ -3715,7 +3837,8 @@ class ThermalCalibrationApp:
     def _show_help(self):
         messagebox.showinfo("How to use",
                             "1 · Images: choose the sensor type (thermal or multispectral; locked once images are loaded), then "
-                            "add the calibration shot(s) that show your reference panels (single-band temperature TIFFs).\n"
+                            "add every calibration shot of the flight that shows your reference panels (single-band "
+                            "temperature TIFFs) and open 2 · Targets.\n"
                             "2 · Targets: the green card says what to do next. Zoom in (wheel), press Draw for a target and click "
                             "its 4 corners, type the reference reading, repeat on every shot.\n"
                             "3 · Fit: watch the panel on the right. With 3 or more targets you get an uncertainty estimate.\n"
@@ -3807,6 +3930,7 @@ class ThermalCalibrationApp:
 
         self._batch_thread = threading.Thread(target=worker, daemon=True)
         self._batch_thread.start()
+        self._update_guidance()
 
     def _cancel_batch(self):
         self._batch_cancel.set()

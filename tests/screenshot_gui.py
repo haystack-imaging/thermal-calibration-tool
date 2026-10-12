@@ -72,6 +72,7 @@ def main():
     app.project_var.set(cfg.get("title", "flight"))
     app._add_calibration_images([c["file"] for c in cfg["calibration"]])
     settle(root)
+    app.show_step(2)                                   # loading no longer switches the step by itself
     by_path = {os.path.abspath(c["file"]): c for c in cfg["calibration"]}
 
     # --- draw the panels on every calibration shot through the click handler
@@ -180,6 +181,7 @@ def main():
         app.survey_entry.delete(0, 'end')
         app.show_step(2)
         app._add_calibration_images([str(real[3])])
+        app.show_step(2)
         settle(root, 4)
         for j, (x, y) in enumerate([(96, 96), (300, 250), (500, 400)]):
             if j >= len(app.calibration_events[0].targets):

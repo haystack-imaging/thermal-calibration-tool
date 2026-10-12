@@ -63,6 +63,16 @@ should re-run it; the cases below say when the old output was affected.
 - The sensor type (thermal / multispectral) is chosen in step 1 and locked while images are loaded, so a
   project cannot change mode halfway through. Redrawing a target hides its old outline at once (Esc restores
   it); an empty image view says what to do first; the window title shows the project name.
+- Step 1 has its own guidance card and no longer jumps to step 2 after the first image: it asks for every
+  calibration shot of the flight and offers an "Open 2 · Targets" button. A calibration image chosen a second
+  time is reported instead of silently ignored. The "all done" guidance asks whether the images show more
+  panels (+ Add target) and offers "Open 4 · Process". × removes a target down to the last one (the last row's
+  × is greyed out) instead of silently refusing at two; Draw, Clear and × have tooltips.
+- Step 4 has a guidance card too (calibration incomplete → survey folder → ready, with a Run button → done,
+  with an Open-folder button), and the empty results table says what to do instead of staying blank.
+- Double-click launchers `Launch.bat` (Windows), `Launch.command` (macOS) and `Launch.sh` (Linux), all running
+  `launch.py`: they create a private `.venv`, install or update the packages when `requirements.txt` changes,
+  pull new commits on a clean checkout and start the tool.
 - Batch processing in a worker thread with Cancel and a live results table.
 - Project files (`*.calib.json`) and a headless command line (`--project FILE --run`); every run saves the
   project next to its outputs.

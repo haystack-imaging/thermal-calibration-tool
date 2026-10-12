@@ -37,7 +37,21 @@ One calibration shot is enough; it then applies one constant correction to the w
 
 ## Installation
 
-Python 3.10 or newer. Tkinter ships with Python on Windows and macOS; on Linux install it with your package manager (`python3-tk` on Debian/Ubuntu, `python3-tkinter` on Fedora).
+**The easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
+double-click the launcher for your system. It installs what is missing the first time (a few minutes, into a
+private `.venv` folder), keeps it current afterwards and starts the tool; later double-clicks just start it.
+
+| System  | Double-click | Needs |
+|---------|--------------|-------|
+| Windows | `Launch.bat` | Python 3.10+ from [python.org](https://www.python.org/downloads/) (tick *Add python.exe to PATH*) |
+| macOS   | `Launch.command` (first time after a download: right-click → *Open*) | Python 3.10+ from python.org |
+| Linux   | `Launch.sh` (GNOME Files: right-click → *Run as a Program*, or `./Launch.sh`) | `python3`, `python3-tk`, `python3-venv` |
+
+The launcher is `launch.py`; `python3 launch.py --update` upgrades the packages, `--no-update` skips the
+`git pull` it does on a clean checkout, and tool arguments pass through (`python3 launch.py --project
+flight.calib.json --run`).
+
+**By hand:** Python 3.10 or newer. Tkinter ships with Python on Windows and macOS; on Linux install it with your package manager (`python3-tk` on Debian/Ubuntu, `python3-tkinter` on Fedora).
 
 Run it from the checkout:
 
@@ -76,15 +90,18 @@ bar is editable (click it); File and Help are in the menu bar (Ctrl+O opens, Ctr
 
 ### 1 · Images
 
-Choose the **Sensor** (thermal or multispectral) first: it decides how images and reference values are read,
-so it is locked as soon as images are loaded (File › New project unlocks it). Then **Add images**: the
-calibration shots that show the targets. They are sorted by capture time (XMP, EXIF or TIFF tag; the source is
-shown). One image is fine.
+Every step starts with a green **NEXT** card that names the one thing to do next. Choose the **Sensor**
+(thermal or multispectral) first: it decides how images and reference values are read, so it is locked as
+soon as images are loaded (File › New project unlocks it). Then **Add images**: every calibration shot of the
+flight that shows the targets (a file chosen twice is reported, not added again). They are sorted by capture
+time (XMP, EXIF or TIFF tag; the source is shown). One image is fine. When all shots are in, press **Open
+2 · Targets** on the card.
 
 ### 2 · Targets
 
-The green **NEXT** card at the top of the step always names the one thing to do next (which target to draw on
-which shot, which reading to type, when to switch shots) and the row it talks about is highlighted.
+The **NEXT** card names the target to draw on which shot, the reading to type and when to switch shots; the
+row it talks about is highlighted. When every target of every shot is done it asks whether the images show
+more panels (then **+ Add target**) and offers **Open 4 · Process**.
 
 1. **Zoom in** with the mouse wheel until the targets are large; right-drag pans, Fit and 1:1 reset the view.
 2. For each target press **Draw** and click its 4 corners; a loupe in the corner magnifies the pixels under
@@ -97,7 +114,8 @@ which shot, which reading to type, when to switch shots) and the row it talks ab
 3. Type the IR thermometer reading in the **truth** field (comma or dot). The cursor is already there after
    the fourth corner; **Enter** moves to the next target's field.
 4. Switch shots with ‹ › and repeat. Targets are shared by all shots: **+ Add target** adds it to every
-   shot, × removes it everywhere; only the polygons and readings are per shot. **Copy to other shots** copies
+   shot, × removes it everywhere (the last row stays; **Clear** removes only its polygon on the current shot);
+   only the polygons and readings are per shot. **Copy to other shots** copies
    polygons when the camera did not move. Double-click a target's ID to name it (black, grey, white …); the
    name appears on the image, in the guidance and in the processing summary.
 
@@ -119,15 +137,15 @@ when outside the calibration window) and the offset b(t) that will be interpolat
 
 ### 4 · Process
 
-1. Choose the **survey folder** (every image in it is processed; use the filename filter, e.g. `_T_deg`, to
-   narrow down) and the output folder. The capture times are read in the background, appear on the timeline,
+1. The **NEXT** card asks for the **survey folder** (every image in it is processed; use the filename filter,
+   e.g. `_T_deg`, to narrow down) and the output folder; the empty results table says the same. The capture times are read in the background, appear on the timeline,
    the pre-flight check runs by itself and every image is listed in the results table as *not processed*.
    The pre-flight list says what will happen: how many images, where their capture times come from, how many
    fall outside the calibration window, which files will be skipped or overwritten. **Check** repeats it.
 
    ![Pre-flight check](GUI_screenshots/GUI_Batch_Preflight.png)
 
-2. Press **Run**. The window stays responsive; **Cancel** stops after the current image; the rows fill in
+2. Press **Run** (on the card or above the table). The window stays responsive; **Cancel** stops after the current image; the rows fill in
    one by one with the same columns as the log.
 
 ![Process step](GUI_screenshots/GUI_Batch.png)

@@ -2,6 +2,7 @@
 Skipped automatically without a display."""
 import datetime as dt
 import json
+import time
 import tkinter.messagebox as mb
 from tkinter import ttk
 
@@ -34,7 +35,11 @@ def test_steps_and_center_views(app, tmp_path):
     p = write_tif(tmp_path / "cal.tif", scene(), T0)
     app.show_step(1)
     app._add_calibration_images([p])
-    assert app.active_step == 2, "adding images moves on to the targets step"
+    assert app.active_step == 1, "adding images stays in step 1: the user may have more shots to add"
+    assert app.images_guide_label.cget("text").startswith("1 shot loaded. Add the other calibration shots")
+    assert app.images_guide_btn.winfo_manager() and app.images_guide_btn.cget("text") == "Open 2 · Targets ›"
+    app.images_guide_btn.invoke()
+    assert app.active_step == 2
     assert app.steps[1].done and "1 calibration shot" in app.steps[1].summary.cget("text")
     assert not app.steps[2].done and not app.steps[3].done
     complete_targets(app, app.calibration_events[0])
@@ -164,7 +169,13 @@ def test_targets_are_shared_across_shots(app, tmp_path, monkeypatch):
     assert [len(e.targets) for e in app.calibration_events] == [3, 3]
     assert [t.name for t in ev_a.targets] == ["Target 1", "Target 2", "Target 3"]
     app._remove_target(0); app._remove_target(0)
-    assert [len(e.targets) for e in app.calibration_events] == [2, 2], "never below two"
+    assert [len(e.targets) for e in app.calibration_events] == [1, 1], "× works down to the last target"
+    assert app.target_rows[0].remove_btn.instate(['disabled']), "the last target's × is greyed out"
+    app._remove_target(0)
+    assert [len(e.targets) for e in app.calibration_events] == [1, 1] and "last target stays" in app.status_var.get()
+    assert app.guide_label.cget("text").startswith("Draw T1"), "the remaining target is guided like any other"
+    app._add_target()
+    assert len(app.target_rows) == 2 and not app.target_rows[0].remove_btn.instate(['disabled'])
 
 
 def test_title_entry_and_menu(app):
@@ -275,7 +286,8 @@ def test_guidance_walks_a_first_time_user_through_step_2(app, tmp_path):
     for pt in poly("T2"):
         app._on_image_click(*pt)
     app.target_rows[1].gt_var.set("25")
-    assert guide().startswith("Shot 1 is done. Press › and draw the same targets on shot 2")
+    assert guide().startswith("Shot 1 is done (2 targets). Press › and draw the same targets on shot 2")
+    assert not app.guide_btn.winfo_manager(), "no step button while shots are still to do"
     assert not any(r.highlighted for r in app.target_rows)
     app._step_image(1)
     assert app.current_event_index == 1 and guide().startswith("Draw T1 on shot 2 of 2")
@@ -284,7 +296,8 @@ def test_guidance_walks_a_first_time_user_through_step_2(app, tmp_path):
         for pt in poly(name):
             app._on_image_click(*pt)
         app.target_rows[j].gt_var.set(str(15 + 10 * j))
-    assert guide().startswith("All shots are done.")
+    assert guide().startswith("All 2 shots done, 2 targets each. More panels in the images? Press + Add target.")
+    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 4 · Process ›"
     app.target_rows[0].gt_var.set("")                      # a reading removed again → back to that step
     assert "Type the thermometer reading for T1" in guide()
 
@@ -363,3 +376,75 @@ def test_empty_canvas_shows_a_hint_and_window_title_follows_the_project(app):
     assert app.root.title().startswith("Flight 7")
     app.project_var.set("untitled project")
     assert app.root.title() == tct.TOOL_NAME
+
+
+def test_step_1_guidance_duplicates_and_the_done_message_allow_for_more_targets(app, tmp_path, monkeypatch):
+    g1 = lambda: app.images_guide_label.cget("text")
+    assert g1().startswith("Choose the sensor type, then press Add images…") and not app.images_guide_btn.winfo_manager()
+    assert "temperature TIFFs" in app.images_guide_detail.cget("text")
+    a = write_tif(tmp_path / "a.tif", scene(), T0)
+    b = write_tif(tmp_path / "b.tif", scene(), T0 + dt.timedelta(minutes=20))
+    app._add_calibration_images([a])
+    assert app.active_step == 1 and g1().startswith("1 shot loaded")
+    assert "then open 2 · Targets" in app.status_var.get()
+    # the same file chosen again: one warning, nothing added, the list unchanged
+    warnings = []
+    monkeypatch.setattr(mb, "showwarning", lambda title, msg, **k: warnings.append((title, msg)))
+    app._add_calibration_images([a])
+    assert len(app.calibration_events) == 1 and warnings and "Already in the list" in warnings[0][1] and "a.tif" in warnings[0][1]
+    assert app.status_var.get().startswith("Nothing added: 1 image(s) were loaded already")
+    warnings.clear()
+    app._add_calibration_images([a, b, b])              # one old, one new (listed twice): one warning, one added
+    assert len(app.calibration_events) == 2 and len(warnings) == 1 and "a.tif" in warnings[0][1] and "b.tif" in warnings[0][1]
+    assert g1().startswith("2 shots loaded. Add any further calibration shots")
+    assert app.images_guide_btn.winfo_manager()
+    # a third target on a single shot: the 'done' message still offers + Add target and the Process button
+    monkeypatch.setattr(mb, "askyesno", lambda *a, **k: True)
+    app.calib_listbox.selection_clear(0, "end"); app.calib_listbox.selection_set(1); app._remove_calibration_image()
+    assert len(app.calibration_events) == 1
+    ev = app.calibration_events[0]
+    complete_targets(app, ev)                            # three complete targets (T1..T3)
+    app._update_step_summaries()
+    g2 = app.guide_label.cget("text")
+    assert g2.startswith("3 targets done on the shot. More panels in the image? Press + Add target.") and "4 · Process" in g2
+    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 4 · Process ›"
+    app.guide_btn.invoke()
+    assert app.active_step == 4
+
+
+def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
+    g4 = lambda: app.process_guide_label.cget("text")
+    btn = app.process_guide_btn
+    assert g4() == "Add the calibration images first." and btn.cget("text") == "Open 1 · Images ›"
+    assert app.process_view.placeholder.winfo_manager() == "place", "the empty results table says what to do"
+    p = write_tif(tmp_path / "cal.tif", scene(), T0)
+    app._add_calibration_images([p])
+    assert g4().startswith("Finish the targets first") and btn.cget("text") == "Open 2 · Targets ›"
+    complete_targets(app, app.calibration_events[0])
+    assert g4().startswith("Choose the survey folder: press Browse") and btn.cget("text") == "Browse…"
+    app.show_step(4)
+    assert app.process_view.placeholder.winfo_manager() == "place"
+    survey = tmp_path / "survey"
+    survey.mkdir()
+    for k in range(3):
+        write_tif(survey / f"s{k}.tif", scene(), T0 + dt.timedelta(minutes=k + 1))
+    app.survey_entry.insert(0, str(survey))
+    app._on_survey_changed()
+    for _ in range(300):
+        app.root.update()
+        if len(app._survey_timestamps) >= 3 and app._last_preflight is not None:
+            break
+        time.sleep(0.03)
+    assert g4() == "3 images ready. Press Run." and btn.cget("text") == "Run"
+    assert not app.process_view.placeholder.winfo_manager(), "pending rows replace the hint"
+    monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
+    btn.invoke()
+    for _ in range(1500):
+        app.root.update()
+        if app._batch_thread and not app._batch_thread.is_alive() and app.start_btn.instate(['!disabled']):
+            break
+        time.sleep(0.02)
+    assert g4().startswith("Done. The calibrated images") and btn.cget("text") == "Open output folder"
+    app.survey_entry.delete(0, "end")                     # another folder: the done state no longer applies
+    app._on_survey_changed()
+    assert g4().startswith("Choose the survey folder") and app.process_view.placeholder.winfo_manager() == "place"
