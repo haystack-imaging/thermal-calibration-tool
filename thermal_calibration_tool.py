@@ -36,7 +36,7 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -1997,12 +1997,13 @@ class FitPanel:
         self.report_btn.pack(fill=tk.X)
         self._fit: Optional[FitResult] = None
         self._targets: List[CalibrationTarget] = []
+        self._others: List[Tuple[str, FitResult]] = []      # the other calibration shots: (label, fit)
         self._unit = "°C"
         self._message = "No calibration image selected"
 
     # --- public ---------------------------------------------------------------
     def clear(self, message: str):
-        self._fit, self._targets, self._message = None, [], message
+        self._fit, self._targets, self._others, self._message = None, [], [], message
         self.subtitle.config(text="")
         for k in self.tiles:
             self.tiles[k].config(text="–")
@@ -2013,8 +2014,11 @@ class FitPanel:
         self.report_btn.state(['disabled'])
 
     def update(self, event: CalibrationEvent, targets: List[CalibrationTarget], unit: str,
-               warnings: List[str], subtitle: str):
+               warnings: List[str], subtitle: str, others: Sequence[Tuple[str, Optional[FitResult]]] = ()):
+        """`others`: (label, fit) of the other calibration shots; they are drawn as thin dashed lines so the
+        drift between shots is visible without switching."""
         self._fit, self._targets, self._unit = event.fit, [t for t in targets if t.is_complete()], unit
+        self._others = [(lb, f) for lb, f in others if f is not None and not f.single_point]
         self.subtitle.config(text=subtitle)
         fit = event.fit
         if fit is None:
@@ -2081,11 +2085,14 @@ class FitPanel:
         L, R, T, B = 40, 12, 12, 28
         x = np.array(fit.x_values)
         y = np.array(fit.y_values)
-        span = max(float(np.ptp(x)), 1e-6)
-        xmin, xmax = x.min() - 0.12 * span - 0.3, x.max() + 0.12 * span + 0.3
+        others = self._others
+        allx = np.concatenate([x] + [np.array(f.x_values) for _, f in others])
+        span = max(float(np.ptp(allx)), 1e-6)
+        xmin, xmax = allx.min() - 0.12 * span - 0.3, allx.max() + 0.12 * span + 0.3
         xs = np.linspace(xmin, xmax, 40)
         band = np.array([fit.predict_uncertainty(v) or 0.0 for v in xs])
-        ys_all = np.concatenate([y, fit.predict(xs) - band, fit.predict(xs) + band])
+        ys_all = np.concatenate([y, fit.predict(xs) - band, fit.predict(xs) + band]
+                                + [np.array(list(f.y_values) + [f.predict(xmin), f.predict(xmax)]) for _, f in others])
         ymin, ymax = float(ys_all.min()), float(ys_all.max())
         yspan = max(ymax - ymin, 1e-6)
         ymin, ymax = ymin - 0.08 * yspan, ymax + 0.08 * yspan
@@ -2097,6 +2104,11 @@ class FitPanel:
             return H - B - (v - ymin) / (ymax - ymin) * (H - T - B)
         c.create_line(L, T, L, H - B, fill=UI['border'])
         c.create_line(L, H - B, W - R, H - B, fill=UI['border'])
+        for _, f in others:                      # drawn first: the selected shot's fit stays on top
+            c.create_line(px(xmin), py(f.predict(xmin)), px(xmax), py(f.predict(xmax)), fill=UI['tick'], width=1,
+                          dash=(4, 3), tags='other')
+            for xi, yi in zip(f.x_values, f.y_values):
+                c.create_oval(px(xi) - 3, py(yi) - 3, px(xi) + 3, py(yi) + 3, fill='', outline=UI['tick'], tags='other')
         if fit.resid_std is not None:
             upper = [(px(v), py(fit.predict(v) + b)) for v, b in zip(xs, band)]
             lower = [(px(v), py(fit.predict(v) - b)) for v, b in zip(xs, band)][::-1]
@@ -2115,6 +2127,17 @@ class FitPanel:
         bx0, by0, bx1, by1 = c.bbox(tid)
         card = c.create_rectangle(bx0 - 3, by0 - 2, bx1 + 3, by1 + 2, fill=UI['plot_bg'], outline='')
         c.tag_raise(tid, card)
+        if others:                               # legend in the other free corner
+            names = ", ".join(lb for lb, _ in others) if len(others) <= 2 else f"{len(others)} other shots"
+            if fit.slope >= 0:
+                lid = c.create_text(W - R - 4, H - B - 4, anchor='se', fill=UI['muted'], font=self.fonts['tiny'],
+                                    text=f"dashed: {names}", tags='other')
+            else:
+                lid = c.create_text(W - R - 4, T + 4, anchor='ne', fill=UI['muted'], font=self.fonts['tiny'],
+                                    text=f"dashed: {names}", tags='other')
+            lx0, ly0, lx1, ly1 = c.bbox(lid)
+            lcard = c.create_rectangle(lx0 - 3, ly0 - 2, lx1 + 3, ly1 + 2, fill=UI['plot_bg'], outline='', tags='other')
+            c.tag_raise(lid, lcard)
         c.create_text((L + W - R) / 2, H - 4, anchor='s', text=f"measured {self._unit}", fill=UI['muted'], font=self.fonts['tiny'])
         try:
             c.create_text(10, T + 4, anchor='ne', angle=90, text=f"reference {self._unit}", fill=UI['muted'], font=self.fonts['tiny'])
@@ -2360,7 +2383,8 @@ class ProcessView:
 class RegressionPlotDialog:
     """Scatter + fitted line + prediction band, residuals below. Uses target colours."""
 
-    def __init__(self, parent, event: CalibrationEvent, targets: List[CalibrationTarget], unit: str, title: str):
+    def __init__(self, parent, event: CalibrationEvent, targets: List[CalibrationTarget], unit: str, title: str,
+                 others: Sequence[Tuple[str, Optional[FitResult]]] = ()):
         if not HAS_MATPLOTLIB:
             messagebox.showerror("Matplotlib required", "Install matplotlib to view the regression plot.")
             return
@@ -2380,9 +2404,14 @@ class RegressionPlotDialog:
         complete = [t for t in targets if t.is_complete()]
         x = np.array(fit.x_values)
         y = np.array(fit.y_values)
-        span = max(float(np.ptp(x)), 1e-6)
-        xr = np.linspace(x.min() - 0.1 * span - 0.5, x.max() + 0.1 * span + 0.5, 200)
-        ax.plot(xr, fit.predict(xr), color='black', linestyle='--', linewidth=1.3, label='fit')
+        others = [(lb, f) for lb, f in others if f is not None and not f.single_point]
+        allx = np.concatenate([x] + [np.array(f.x_values) for _, f in others])
+        span = max(float(np.ptp(allx)), 1e-6)
+        xr = np.linspace(allx.min() - 0.1 * span - 0.5, allx.max() + 0.1 * span + 0.5, 200)
+        for lb, f in others:                      # the other calibration shots: thin dotted, hollow points
+            ax.plot(xr, f.predict(xr), color=UI['tick'], linestyle=':', linewidth=1.1, label=lb)
+            ax.scatter(f.x_values, f.y_values, facecolors='none', edgecolors=UI['tick'], s=40, zorder=2)
+        ax.plot(xr, fit.predict(xr), color='black', linestyle='--', linewidth=1.3, label='fit (this shot)' if others else 'fit')
         if fit.resid_std is not None:
             band = np.array([fit.predict_uncertainty(v) for v in xr])
             ax.fill_between(xr, fit.predict(xr) - band, fit.predict(xr) + band, color='#999999', alpha=0.2,
@@ -3619,14 +3648,20 @@ class ThermalCalibrationApp:
         label = "only" if n == 1 else ("start" if idx == 0 else ("end" if idx == n - 1 else f"mid {idx}"))
         self.fit_panel.update(ev, self._visible_targets(ev), self._unit(), self._fit_warnings(ev, warn),
                               f"shot {idx + 1}/{n} · {label} · {sum(1 for t in self._visible_targets(ev) if t.is_complete())} "
-                              f"target{'s' if sum(1 for t in self._visible_targets(ev) if t.is_complete()) != 1 else ''}")
+                              f"target{'s' if sum(1 for t in self._visible_targets(ev) if t.is_complete()) != 1 else ''}",
+                              others=self._other_fits(ev))
+
+    def _other_fits(self, ev: CalibrationEvent) -> List[Tuple[str, Optional[FitResult]]]:
+        """(label, fit) of every other calibration shot, for the overlays in the fit panel and the detailed plot."""
+        return [(f"shot {k + 1} · {e.timestamp:%H:%M}", e.fit) for k, e in enumerate(self.calibration_events) if e is not ev]
 
     def _show_regression_plot(self):
         ev = self._current_event()
         if ev is None or ev.fit is None or ev.fit.single_point:
             self.status_var.set("Need a fit with at least 2 complete targets to plot.")
             return
-        RegressionPlotDialog(self.root, ev, ev.targets, self._unit(), f"Fit for {Path(ev.image_path).name}")
+        RegressionPlotDialog(self.root, ev, ev.targets, self._unit(), f"Fit for {Path(ev.image_path).name}",
+                             others=self._other_fits(ev))
 
     def _export_fit_report(self):
         ev = self._current_event()

@@ -25,6 +25,19 @@ def tk_root():
         pass
 
 
+@pytest.fixture(autouse=True)
+def no_modal_dialogs(monkeypatch):
+    """A stray message box would block the suite forever on a hidden root. Every dialog is recorded instead;
+    questions answer "yes". Tests that care patch the function again themselves."""
+    import tkinter.messagebox as mb
+    shown = []
+    for name in ("showerror", "showwarning", "showinfo"):
+        monkeypatch.setattr(mb, name, lambda title, message="", _n=name, **k: shown.append((_n, title, message)))
+    for name in ("askyesno", "askokcancel", "askquestion", "askretrycancel"):
+        monkeypatch.setattr(mb, name, lambda *a, **k: True)
+    return shown
+
+
 @pytest.fixture
 def app(tk_root):
     a = tct.ThermalCalibrationApp(tk_root)

@@ -476,3 +476,27 @@ def test_settings_section_opens_like_a_step_but_keeps_the_view(app, tmp_path):
     app.emis_enabled.set(True)
     app._on_settings_change()
     assert "emissivity on" in s.summary.cget("text")
+
+
+def test_fit_panel_overlays_the_other_shots(app, tmp_path):
+    a = write_tif(tmp_path / "a.tif", scene(blur=0.4), T0)
+    b = write_tif(tmp_path / "b.tif", scene(blur=0.4), T0 + dt.timedelta(minutes=20))
+    app._add_calibration_images([a, b])
+    fp = app.fit_panel
+    ev_a, ev_b = app.calibration_events
+    complete_targets(app, ev_a)
+    app.root.update_idletasks()
+    assert fp._others == [] and not fp.plot.find_withtag('other'), "shot 2 has no fit yet: nothing to overlay"
+    app._load_image(1)
+    complete_targets(app, ev_b)
+    for t in ev_b.targets:
+        t.ground_truth += 1.0                                # a different (shifted) line on shot 2
+    app._recompute_fit(ev_b)
+    app.root.update_idletasks()
+    assert [lb for lb, _ in fp._others] == [f"shot 1 · {T0:%H:%M}"] and fp._others[0][1] is ev_a.fit
+    items = fp.plot.find_withtag('other')
+    assert items, "the other shot's line, points and legend are drawn"
+    assert any("dashed: shot 1" in fp.plot.itemcget(i, 'text') for i in items if fp.plot.type(i) == 'text')
+    app._load_image(0)
+    app.root.update_idletasks()
+    assert [lb for lb, _ in fp._others] == [f"shot 2 · {T0 + dt.timedelta(minutes=20):%H:%M}"]

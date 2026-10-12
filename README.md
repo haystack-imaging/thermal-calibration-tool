@@ -121,7 +121,9 @@ more panels (then **+ Add target**) and offers **Open 3 · Process**.
 
 ### The fit panel
 
-The panel on the right updates with every reading: a regression plot with the ±1σ prediction band,
+The panel on the right shows the fit of the **selected calibration shot** (its header says which) and updates
+with every reading: a regression plot with the ±1σ prediction band, the other shots' fits as thin dashed
+lines with hollow points (so the drift between shots is visible without switching),
 residual bars per target, m and b with their standard errors, R², leave-one-out error and the ±1σ prediction
 uncertainty at the mean target value. Warnings appear in plain words (two targets, negative slope,
 extrapolation beyond the target span). **Detailed plot** opens a matplotlib window; **Export fit report**
