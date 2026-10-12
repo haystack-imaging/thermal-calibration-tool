@@ -1731,8 +1731,9 @@ class StepSection:
     """One step of the left rail: a clickable header with a status badge and a one-line summary,
     and a body that is shown only while the step is active (accordion)."""
 
-    def __init__(self, parent, number: int, title: str, on_activate: Callable[[int], None], fonts: Dict[str, Any]):
-        self.number, self.fonts, self.done, self.active = number, fonts, False, False
+    def __init__(self, parent, number: Optional[int], title: str, on_activate: Callable[[Optional[int]], None],
+                 fonts: Dict[str, Any], glyph: str = ""):
+        self.number, self.fonts, self.done, self.active, self.glyph = number, fonts, False, False, glyph
         self.outer = tk.Frame(parent, bg=UI['panel'])
         self.outer.pack(fill=tk.X)
         self.header = tk.Frame(self.outer, bg=UI['panel'], cursor='hand2')
@@ -1741,7 +1742,8 @@ class StepSection:
         self.badge.pack(side=tk.LEFT, padx=(14, 10), pady=10)
         txt = tk.Frame(self.header, bg=UI['panel'])
         txt.pack(side=tk.LEFT, fill=tk.X, expand=True, pady=6)
-        self.title = tk.Label(txt, text=f"{number} · {title}", bg=UI['panel'], fg=UI['text'], font=fonts['bold'], anchor='w')
+        self.title = tk.Label(txt, text=(f"{number} · {title}" if number is not None else title), bg=UI['panel'],
+                              fg=UI['text'], font=fonts['bold'], anchor='w')
         self.title.pack(fill=tk.X)
         self.summary = tk.Label(txt, text="", bg=UI['panel'], fg=UI['muted'], font=fonts['small'], anchor='w',
                                 justify='left', wraplength=230)
@@ -1764,6 +1766,11 @@ class StepSection:
     def set_summary(self, text: str):
         self.summary.config(text=text)
 
+    def collapse(self):
+        """Hide the body but keep the header styled as active (while the Settings section is open)."""
+        self.body.pack_forget()
+        self.chevron.config(text="›")
+
     def set_active(self, active: bool):
         self.active = active
         bg = UI['accent_soft'] if active else UI['panel']
@@ -1779,15 +1786,16 @@ class StepSection:
     def _draw_badge(self):
         c = self.badge
         c.delete('all')
+        label = str(self.number) if self.number is not None else self.glyph
         if self.done:
             c.create_oval(1, 1, 23, 23, fill=UI['ok'], outline=UI['ok'])
             c.create_line(7, 12, 11, 16, 17, 8, fill='white', width=2.5, capstyle='round', joinstyle='round')
         elif self.active:
             c.create_oval(1, 1, 23, 23, fill=UI['accent'], outline=UI['accent'])
-            c.create_text(12, 12, text=str(self.number), fill='white', font=self.fonts['small_bold'])
+            c.create_text(12, 12, text=label, fill='white', font=self.fonts['small_bold'])
         else:
             c.create_oval(2, 2, 22, 22, fill=UI['panel'], outline=UI['tick'], width=1.5)
-            c.create_text(12, 12, text=str(self.number), fill=UI['muted'], font=self.fonts['small_bold'])
+            c.create_text(12, 12, text=label, fill=UI['muted'], font=self.fonts['small_bold'])
 
 
 # =============================================================================
@@ -2426,7 +2434,7 @@ class ThermalCalibrationApp:
 
     MODE_THERMAL = MODE_THERMAL
     MODE_MSI = MODE_MSI
-    STEP_TITLES = {1: "Images", 2: "Targets", 3: "Fit", 4: "Process"}
+    STEP_TITLES = {1: "Images", 2: "Targets", 3: "Process"}
 
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -2543,10 +2551,12 @@ class ThermalCalibrationApp:
         rail_outer.bind('<Enter>', lambda e: self._bind_panel_wheel(True))
         rail_outer.bind('<Leave>', lambda e: self._bind_panel_wheel(False))
         self.steps: Dict[int, StepSection] = {n: StepSection(self.rail, n, t, self.show_step, f) for n, t in self.STEP_TITLES.items()}
+        # not a step: rarely touched options, below the steps, opened and closed like them
+        self.settings_section = StepSection(self.rail, None, "Settings", lambda n: self._toggle_settings(), f, glyph="⚙")
         self._build_step_images(self.steps[1].body)
         self._build_step_targets(self.steps[2].body)
-        self._build_step_fit(self.steps[3].body)
-        self._build_step_process(self.steps[4].body)
+        self._build_step_process(self.steps[3].body)
+        self._build_settings(self.settings_section.body)
         self.rail_hint = tk.Label(self.rail, text="Single shot? Fine: one set of coefficients is applied to all images. "
                                                   "Two shots also correct drift during the flight.",
                                   bg=UI['panel'], fg=UI['muted'], font=f['tiny'], justify='left', wraplength=280, padx=14, pady=10)
@@ -2720,6 +2730,15 @@ class ThermalCalibrationApp:
         self.add_target_btn.pack(side=tk.LEFT)
         self.copy_btn = ttk.Button(tb, text="Copy to other shots", command=self._copy_polygons)
         self.copy_btn.pack(side=tk.LEFT, padx=6)
+        tk.Label(body, text="Wheel: zoom · right-drag: pan · Esc: cancel drawing · comma or dot accepted · "
+                            "ROI edge inset: see Settings",
+                 bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(6, 0))
+
+    def _build_settings(self, body):
+        """Project-wide options that are rarely touched; all of them are saved in the project file."""
+        f = self.fonts
+        tk.Label(body, text="Saved in the project file; applied to every shot and every survey image.",
+                 bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(2, 6))
         ir = tk.Frame(body, bg=UI['bg'])
         ir.pack(fill=tk.X)
         tk.Label(ir, text="ROI edge inset (px)", bg=UI['bg'], fg=UI['text'], font=f['small']).pack(side=tk.LEFT)
@@ -2731,16 +2750,8 @@ class ThermalCalibrationApp:
                       "3 px, so edge pixels are mixed with the background. 3 px is a good default; the dashed outline on the "
                       f"image shows the region actually used. A ⚠ means fewer than {MIN_ROI_PIXELS} pixels or no inset "
                       "possible: draw the polygon larger or zoom in.", side=tk.LEFT)
-        tk.Label(body, text="Wheel: zoom · right-drag: pan · Esc: cancel drawing · comma or dot accepted",
-                 bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(6, 0))
-
-    def _build_step_fit(self, body):
-        f = self.fonts
-        tk.Label(body, text="The fit panel on the right updates as you enter readings: the regression line, residuals, "
-                            "standard errors, RMSE, leave-one-out error and the ±1σ prediction uncertainty of the fit.",
-                 bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(2, 6))
         self.emis_frame = tk.Frame(body, bg=UI['bg'])
-        self.emis_frame.pack(fill=tk.X, pady=(2, 0))
+        self.emis_frame.pack(fill=tk.X, pady=(10, 0))
         er = tk.Frame(self.emis_frame, bg=UI['bg'])
         er.pack(fill=tk.X)
         ttk.Checkbutton(er, text="Emissivity correction (advanced)", variable=self.emis_enabled, command=self._on_settings_change).pack(side=tk.LEFT)
@@ -2762,9 +2773,12 @@ class ThermalCalibrationApp:
             e_.bind('<FocusOut>', lambda e: self._on_settings_change())
             e_.bind('<Return>', lambda e: self._on_settings_change())
             var.trace_add('write', lambda *a, e_=e_, var=var, lo=lo, hi=hi: self._validate_setting_entry(e_, var, lo, hi))
-        tk.Label(body, text="With 3 or more targets the scatter can be estimated. With 2, R² is 1 by construction "
-                            "and nothing can be checked.",
-                 bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(10, 0))
+        self.settings_opts = opts = tk.Frame(body, bg=UI['bg'])
+        opts.pack(fill=tk.X, pady=(10, 0))
+        ttk.Checkbutton(opts, text="Copy EXIF/XMP/GPS to outputs" + ("" if shutil.which('exiftool') else " (exiftool not found: GDAL tags only)"),
+                        variable=self.copy_meta_var, command=self._update_step_summaries).pack(anchor='w')
+        ttk.Checkbutton(opts, text="Skip images whose output already exists", variable=self.skip_existing_var,
+                        command=self._update_step_summaries).pack(anchor='w', pady=(4, 0))
 
     def _build_step_process(self, body):
         f = self.fonts
@@ -2793,11 +2807,6 @@ class ThermalCalibrationApp:
         fe.bind('<Return>', lambda e: self._on_survey_changed())
         help_icon(r, "Only files whose name contains this text are processed, e.g. '_T_deg' to skip the colour previews "
                      "next to the temperature TIFFs, or '_3' for one multispectral band.", side=tk.LEFT, padx=6)
-        opts = tk.Frame(body, bg=UI['bg'])
-        opts.pack(fill=tk.X, pady=(10, 0))
-        ttk.Checkbutton(opts, text="Copy EXIF/XMP/GPS to outputs" + ("" if shutil.which('exiftool') else " (exiftool not found: GDAL tags only)"),
-                        variable=self.copy_meta_var).pack(anchor='w')
-        ttk.Checkbutton(opts, text="Skip images whose output already exists", variable=self.skip_existing_var).pack(anchor='w', pady=(4, 0))
         tk.Label(body, text="Choosing a folder runs the pre-flight check and lists the images; then press Run.",
                  bg=UI['bg'], fg=UI['muted'], font=f['tiny'], justify='left', anchor='w', wraplength=280).pack(fill=tk.X, pady=(10, 0))
 
@@ -2807,7 +2816,8 @@ class ThermalCalibrationApp:
         self.active_step = n
         for k, s in self.steps.items():
             s.set_active(k == n)
-        if n == 4:
+        self.settings_section.set_active(False)
+        if n == 3:
             self.image_view.pack_forget()
             self.process_view.frame.pack(fill=tk.BOTH, expand=True)
             self._on_survey_changed()
@@ -2815,6 +2825,17 @@ class ThermalCalibrationApp:
             self.process_view.frame.pack_forget()
             self.image_view.pack(fill=tk.BOTH, expand=True)
         self._rail_canvas.yview_moveto(0)
+
+    def _toggle_settings(self):
+        """Settings opens and closes like a step, but the centre view stays with the active step."""
+        opening = not self.settings_section.active
+        if opening:
+            self.steps[self.active_step].collapse()
+            self.settings_section.set_active(True)
+            self.root.after_idle(lambda: self._rail_canvas.yview_moveto(1.0))
+        else:
+            self.settings_section.set_active(False)
+            self.steps[self.active_step].set_active(True)
 
     def _step_image(self, delta: int):
         if not self.calibration_events:
@@ -2836,16 +2857,18 @@ class ThermalCalibrationApp:
         complete = [sum(1 for t in (e.targets[:1] if self._is_single_point() else e.targets) if t.is_complete()) for e in evs]
         need = 1 if self._is_single_point() else 2
         targets_done = bool(evs) and all(c >= need for c in complete)
-        self.steps[2].set_done(targets_done, (f"{sum(complete)} complete target(s) on {n} shot(s)" if evs else "waiting for images"))
         fitted = [e for e in evs if e.fit is not None]
-        if fitted:
-            rm = [e.fit.rmse for e in fitted if e.fit.rmse is not None]
-            txt = f"{len(fitted)}/{n} fitted" + (f" · RMSE {min(rm):.2f} to {max(rm):.2f} {self._unit()}" if rm else "")
-            self.steps[3].set_done(len(fitted) == n, txt)
-        else:
-            self.steps[3].set_done(False, "no fit yet")
+        rm = [e.fit.rmse for e in fitted if e.fit.rmse is not None]
+        fit_txt = (f" · {len(fitted)}/{n} fitted" + (f", RMSE {min(rm):.2f} to {max(rm):.2f} {self._unit()}" if rm else "")
+                   if fitted else "")
+        self.steps[2].set_done(targets_done, (f"{sum(complete)} complete target(s) on {n} shot(s){fit_txt}" if evs
+                                              else "waiting for images"))
+        self.settings_section.set_summary(f"ROI inset {self._roi_inset()} px · emissivity "
+                                          f"{'on' if self.emis_enabled.get() else 'off'}"
+                                          + (" · skip existing outputs" if self.skip_existing_var.get() else "")
+                                          + ("" if self.copy_meta_var.get() else " · no metadata copy"))
         out = self._last_output
-        self.steps[4].set_done(out is not None, (f"written to {os.path.basename(out)}" if out else
+        self.steps[3].set_done(out is not None, (f"written to {os.path.basename(out)}" if out else
                                                  (f"{len(self._survey_timestamps)} survey images, not processed yet"
                                                   if self._survey_timestamps else "choose the survey folder")))
         self._update_mode_lock()
@@ -2932,12 +2955,12 @@ class ThermalCalibrationApp:
                     "Copy to other shots helps when the camera did not move.", None, k, None)
         if n == 1:
             return (f"{done} done on the shot. More panels in the image? Press + Add target. If not, check the fit "
-                    "on the right, then open 4 · Process.",
+                    "on the right, then open 3 · Process.",
                     "A single shot is fine: its coefficients are applied to the whole flight. Add a second "
-                    "(end-of-flight) shot in 1 · Images to correct drift.", None, i, 4)
+                    "(end-of-flight) shot in 1 · Images to correct drift.", None, i, 3)
         return (f"All {n} shots done, {done} each. More panels in the images? Press + Add target. If not, check the "
-                "fits on the right, then open 4 · Process.",
-                "Switch shots with ‹ › to compare their fits; the timeline below the image shows the drift.", None, i, 4)
+                "fits on the right, then open 3 · Process.",
+                "Switch shots with ‹ › to compare their fits; the timeline below the image shows the drift.", None, i, 3)
 
     def _next_action_process(self) -> Tuple[str, str, Optional[Tuple[str, Callable[[], None]]]]:
         """What a user has to do next in step 4: (headline, detail, button)."""
@@ -3078,7 +3101,7 @@ class ThermalCalibrationApp:
         self.mode_status.config(text="Thermal" if thermal else ("Multispectral · single point" if self.msi_single_point.get() else "Multispectral · multi point"))
         if thermal:
             self.msi_method_frame.pack_forget()
-            self.emis_frame.pack(fill=tk.X, pady=(8, 0))
+            self.emis_frame.pack(fill=tk.X, pady=(10, 0), before=self.settings_opts)
         else:
             self.msi_method_frame.pack(fill=tk.X, pady=(4, 0))
             self.emis_frame.pack_forget()
@@ -3841,8 +3864,11 @@ class ThermalCalibrationApp:
                             "temperature TIFFs) and open 2 · Targets.\n"
                             "2 · Targets: the green card says what to do next. Zoom in (wheel), press Draw for a target and click "
                             "its 4 corners, type the reference reading, repeat on every shot.\n"
-                            "3 · Fit: watch the panel on the right. With 3 or more targets you get an uncertainty estimate.\n"
-                            "4 · Process: choose the survey images and the output folder, press Check, then Run.\n\n"
+                            "3 · Process: choose the survey folder and the output folder, then Run.\n"
+                            "Settings (bottom of the rail): ROI edge inset, emissivity correction, metadata copy, skipping "
+                            "existing outputs; all saved in the project file.\n\n"
+                            "The fit panel on the right updates as you enter readings; with 3 or more targets you get an "
+                            "uncertainty estimate.\n\n"
                             "Save the project (Ctrl+S) to keep polygons and readings; it can be re-run from the command "
                             "line with --project FILE --run.")
 

@@ -54,7 +54,8 @@ should re-run it; the cases below say when the old output was affected.
 - Pre-flight check listing file types, time sources, images outside the calibration window and overwrites;
   it runs by itself when the survey folder is chosen, and every image is listed before processing.
 - Zoom, pan, loupe, cursor readout and colour bar on the image view.
-- Four-step layout (Images, Targets, Fit, Process) with a flight timeline, a live fit panel and an editable
+- Three-step layout (Images, Targets, Process) with a flight timeline, a live fit panel, a Settings section
+  (ROI inset, emissivity, metadata copy, skip existing) and an editable
   project title. Targets are shared by all calibration shots.
 - Step 2 guidance card: states the next action (which target to draw on which shot, which reading to type,
   when to switch shots) and highlights the row concerned; the reading field gets the focus after the fourth
@@ -66,9 +67,9 @@ should re-run it; the cases below say when the old output was affected.
 - Step 1 has its own guidance card and no longer jumps to step 2 after the first image: it asks for every
   calibration shot of the flight and offers an "Open 2 · Targets" button. A calibration image chosen a second
   time is reported instead of silently ignored. The "all done" guidance asks whether the images show more
-  panels (+ Add target) and offers "Open 4 · Process". × removes a target down to the last one (the last row's
+  panels (+ Add target) and offers "Open 3 · Process". × removes a target down to the last one (the last row's
   × is greyed out) instead of silently refusing at two; Draw, Clear and × have tooltips.
-- Step 4 has a guidance card too (calibration incomplete → survey folder → ready, with a Run button → done,
+- The Process step has a guidance card too (calibration incomplete → survey folder → ready, with a Run button → done,
   with an Open-folder button), and the empty results table says what to do instead of staying blank.
 - Double-click launchers `Launch.bat` (Windows), `Launch.command` (macOS) and `Launch.sh` (Linux), all running
   `launch.py`: they create a private `.venv`, install or update the packages when `requirements.txt` changes,

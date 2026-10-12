@@ -153,7 +153,7 @@ def main():
     app.show_step(2)
     settle(root, 4)
     shoot(root, "GUI_Timeline.png")
-    app.show_step(4)
+    app.show_step(3)
     settle(root, 6)
     shoot(root, "GUI_Batch_Preflight.png")
     import tkinter.messagebox as mb

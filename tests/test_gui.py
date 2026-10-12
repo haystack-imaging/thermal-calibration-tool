@@ -1,4 +1,4 @@
-"""GUI behaviour of the four-step layout, driven through the same handlers the mouse uses.
+"""GUI behaviour of the three-step layout, driven through the same handlers the mouse uses.
 Skipped automatically without a display."""
 import datetime as dt
 import json
@@ -27,9 +27,9 @@ def complete_targets(app, ev, img=None):
 
 def test_steps_and_center_views(app, tmp_path):
     assert app.active_step == 1 and app.steps[1].active and app.image_view.winfo_manager()
-    app.show_step(4)
+    app.show_step(3)
     assert app.process_view.frame.winfo_manager() and not app.image_view.winfo_manager()
-    assert app.steps[4].active and not app.steps[1].active
+    assert app.steps[3].active and not app.steps[1].active
     app.show_step(2)
     assert app.image_view.winfo_manager() and not app.process_view.frame.winfo_manager()
     p = write_tif(tmp_path / "cal.tif", scene(), T0)
@@ -43,8 +43,8 @@ def test_steps_and_center_views(app, tmp_path):
     assert app.steps[1].done and "1 calibration shot" in app.steps[1].summary.cget("text")
     assert not app.steps[2].done and not app.steps[3].done
     complete_targets(app, app.calibration_events[0])
-    assert app.steps[2].done and app.steps[3].done
-    assert "RMSE" in app.steps[3].summary.cget("text")
+    assert app.steps[2].done and not app.steps[3].done
+    assert "1/1 fitted, RMSE" in app.steps[2].summary.cget("text"), "the fit summary lives in step 2"
 
 
 def test_fit_panel_reflects_the_fit(app, tmp_path):
@@ -91,7 +91,7 @@ def test_timeline_gets_survey_scan(app, tmp_path):
     assert pump(app.root, lambda: len(app._survey_timestamps) == 4)
     assert len(app.timeline.survey) == 4 and "4 images" in app.timeline.summary.cget("text")
     assert app.timeline.events and app.timeline.canvas.find_all()
-    assert "4 survey images, not processed yet" in app.steps[4].summary.cget("text")
+    assert "4 survey images, not processed yet" in app.steps[3].summary.cget("text")
     rows = app.process_view.tree.get_children()
     assert len(rows) == 4 and app.process_view.tree.item(rows[0])["values"][-1] == "not processed", "listed before any run"
     assert "passed" in app.process_view.pf_counts.cget("text"), "pre-flight ran by itself"
@@ -111,7 +111,7 @@ def test_batch_from_gui_fills_results_table(app, tmp_path, monkeypatch):
     app.survey_entry.insert(0, str(sur))
     app.output_entry.insert(0, str(tmp_path / "out"))
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
-    app.show_step(4)
+    app.show_step(3)
     rep = app._run_preflight()
     assert not rep.blocking and "passed" in app.process_view.pf_counts.cget("text")
     pending = app.process_view.tree.get_children()
@@ -124,7 +124,7 @@ def test_batch_from_gui_fills_results_table(app, tmp_path, monkeypatch):
     first = app.process_view.tree.item(rows[0])["values"]
     assert first[0] == "s0.tif" and "TIFF tag" in first[1] and first[-1] == "ok"
     assert app.process_view.open_btn.instate(['!disabled'])
-    assert app.steps[4].done and "written to" in app.steps[4].summary.cget("text")
+    assert app.steps[3].done and "written to" in app.steps[3].summary.cget("text")
     assert "Done: 3 ok" in app.progress_label.cget("text")
     assert any("Done" in l for l in app.log_text)
 
@@ -297,7 +297,7 @@ def test_guidance_walks_a_first_time_user_through_step_2(app, tmp_path):
             app._on_image_click(*pt)
         app.target_rows[j].gt_var.set(str(15 + 10 * j))
     assert guide().startswith("All 2 shots done, 2 targets each. More panels in the images? Press + Add target.")
-    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 4 · Process ›"
+    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 3 · Process ›"
     app.target_rows[0].gt_var.set("")                      # a reading removed again → back to that step
     assert "Type the thermometer reading for T1" in guide()
 
@@ -406,10 +406,10 @@ def test_step_1_guidance_duplicates_and_the_done_message_allow_for_more_targets(
     complete_targets(app, ev)                            # three complete targets (T1..T3)
     app._update_step_summaries()
     g2 = app.guide_label.cget("text")
-    assert g2.startswith("3 targets done on the shot. More panels in the image? Press + Add target.") and "4 · Process" in g2
-    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 4 · Process ›"
+    assert g2.startswith("3 targets done on the shot. More panels in the image? Press + Add target.") and "3 · Process" in g2
+    assert app.guide_btn.winfo_manager() and app.guide_btn.cget("text") == "Open 3 · Process ›"
     app.guide_btn.invoke()
-    assert app.active_step == 4
+    assert app.active_step == 3
 
 
 def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
@@ -422,7 +422,7 @@ def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
     assert g4().startswith("Finish the targets first") and btn.cget("text") == "Open 2 · Targets ›"
     complete_targets(app, app.calibration_events[0])
     assert g4().startswith("Choose the survey folder: press Browse") and btn.cget("text") == "Browse…"
-    app.show_step(4)
+    app.show_step(3)
     assert app.process_view.placeholder.winfo_manager() == "place"
     survey = tmp_path / "survey"
     survey.mkdir()
@@ -448,3 +448,26 @@ def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
     app.survey_entry.delete(0, "end")                     # another folder: the done state no longer applies
     app._on_survey_changed()
     assert g4().startswith("Choose the survey folder") and app.process_view.placeholder.winfo_manager() == "place"
+
+
+def test_settings_section_opens_like_a_step_but_keeps_the_view(app, tmp_path):
+    assert list(app.steps) == [1, 2, 3] and app.STEP_TITLES[3] == "Process"
+    s = app.settings_section
+    assert not s.active and s.title.cget("text") == "Settings" and s.number is None
+    assert s.summary.cget("text") == "ROI inset 3 px · emissivity off"
+    assert app.steps[1].active and app.steps[1].body.winfo_manager()
+    app._toggle_settings()
+    assert s.active and s.body.winfo_manager(), "the section expands"
+    assert app.steps[1].active and not app.steps[1].body.winfo_manager(), "the step header stays active, its body folds"
+    assert app.active_step == 1 and app.image_view.winfo_manager(), "the centre view does not change"
+    app._toggle_settings()
+    assert not s.active and app.steps[1].body.winfo_manager()
+    app._toggle_settings()
+    app.show_step(2)
+    assert not s.active and app.steps[2].body.winfo_manager(), "opening a step closes Settings"
+    app.skip_existing_var.set(True); app.copy_meta_var.set(False); app.roi_inset_var.set(5)
+    app._update_step_summaries()
+    assert s.summary.cget("text") == "ROI inset 5 px · emissivity off · skip existing outputs · no metadata copy"
+    app.emis_enabled.set(True)
+    app._on_settings_change()
+    assert "emissivity on" in s.summary.cget("text")

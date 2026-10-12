@@ -24,7 +24,7 @@ One calibration shot is enough; it then applies one constant correction to the w
 ## Features
 
 - Any number of calibration images; coefficients interpolated between all of them (start, mid, end).
-- Four-step layout (Images, Targets, Fit, Process) with a flight timeline and a live fit panel.
+- Three-step layout (Images, Targets, Process) with a flight timeline, a live fit panel and a Settings section.
 - Zoomable image (wheel), pan (right drag), loupe while placing corners, cursor readout, colour bar, Inferno / grey / CLAHE display.
 - Targets are defined by 4-corner polygons; a fixed pixel inset (default 3 px) removes the blurred edge before the mean is taken, and the region actually used is drawn dashed.
 - Fit diagnostics: R², RMSE, standard errors of m and b, leave-one-out error, residual bars, ±1σ prediction band, extrapolation warning; HTML fit report export.
@@ -84,7 +84,7 @@ Two things to know about that step:
 
 ## Workflow
 
-The window has four steps on the left (Images, Targets, Fit, Process), the image with a flight timeline in the
+The window has three steps on the left (Images, Targets, Process) and a Settings section below them, the image with a flight timeline in the
 centre and a live fit panel on the right. Each step shows a tick once it is done. The project title in the top
 bar is editable (click it); File and Help are in the menu bar (Ctrl+O opens, Ctrl+S saves).
 
@@ -101,12 +101,12 @@ time (XMP, EXIF or TIFF tag; the source is shown). One image is fine. When all s
 
 The **NEXT** card names the target to draw on which shot, the reading to type and when to switch shots; the
 row it talks about is highlighted. When every target of every shot is done it asks whether the images show
-more panels (then **+ Add target**) and offers **Open 4 · Process**.
+more panels (then **+ Add target**) and offers **Open 3 · Process**.
 
 1. **Zoom in** with the mouse wheel until the targets are large; right-drag pans, Fit and 1:1 reset the view.
 2. For each target press **Draw** and click its 4 corners; a loupe in the corner magnifies the pixels under
    the cursor and the readout next to it shows the value. The row shows the ROI mean, its spread and the
-   number of pixels used; the dashed outline on the image is the region actually used (edge inset, default 3 px).
+   number of pixels used; the dashed outline on the image is the region actually used (edge inset, default 3 px, set in **Settings**).
    Redrawing a target removes its old outline the moment you press Draw; **Esc** cancels and brings it back.
 
    ![Placing a corner with the loupe](GUI_screenshots/GUI_Drawing_Loupe.png)
@@ -119,14 +119,14 @@ more panels (then **+ Add target**) and offers **Open 4 · Process**.
    polygons when the camera did not move. Double-click a target's ID to name it (black, grey, white …); the
    name appears on the image, in the guidance and in the processing summary.
 
-### 3 · Fit
+### The fit panel
 
 The panel on the right updates with every reading: a regression plot with the ±1σ prediction band,
 residual bars per target, m and b with their standard errors, R², leave-one-out error and the ±1σ prediction
 uncertainty at the mean target value. Warnings appear in plain words (two targets, negative slope,
 extrapolation beyond the target span). **Detailed plot** opens a matplotlib window; **Export fit report**
-writes a self-contained HTML report for a methods section. Step 3 in the rail holds the optional emissivity
-correction.
+writes a self-contained HTML report for a methods section. With two targets R² is 1 by construction and no
+scatter can be estimated; three or more give the uncertainty figures.
 
 The timeline under the image shows the calibration shots as diamonds, the survey images as ticks (orange
 when outside the calibration window) and the offset b(t) that will be interpolated.
@@ -135,7 +135,7 @@ when outside the calibration window) and the offset b(t) that will be interpolat
 
 ![Regression plot](GUI_screenshots/GUI_Regression_Plot.png)
 
-### 4 · Process
+### 3 · Process
 
 1. The **NEXT** card asks for the **survey folder** (every image in it is processed; use the filename filter,
    e.g. `_T_deg`, to narrow down) and the output folder; the empty results table says the same. The capture times are read in the background, appear on the timeline,
@@ -149,6 +149,13 @@ when outside the calibration window) and the offset b(t) that will be interpolat
    one by one with the same columns as the log.
 
 ![Process step](GUI_screenshots/GUI_Batch.png)
+
+### Settings
+
+The unnumbered **Settings** section at the bottom of the rail holds what is rarely touched and saved in the
+project file: the **ROI edge inset** (pixels removed from the polygon edge before the mean, default 3), the
+**emissivity correction** (advanced, off by default, see below), **Copy EXIF/XMP/GPS to outputs** and **Skip
+images whose output already exists**. Its summary line shows the current values.
 
 ### Output files
 
@@ -187,7 +194,7 @@ The headless run performs the same pre-flight check and writes the same files. P
 
 ## Emissivity correction (Advanced, usually off)
 
-The empirical line already absorbs the panels' emissivity, and the DJI SDK applies an emissivity when converting R-JPEGs (0.95 on the M4T). Enable the correction only if your images are apparent temperatures (converted with ε = 1.0). Sensor drift acts on what the sensor sees, so the correction works in apparent-temperature space: the reference readings are converted to the apparent temperature of each panel (its true temperature through the panel emissivity), the fit maps raw sensor values to those, m and b are applied to the raw survey pixels, and the result is converted to surface temperature with the scene emissivity (vegetation about 0.97 to 0.99). Broadband grey-body approximation:
+Switched on in **Settings** at the bottom of the rail. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies an emissivity when converting R-JPEGs (0.95 on the M4T). Enable the correction only if your images are apparent temperatures (converted with ε = 1.0). Sensor drift acts on what the sensor sees, so the correction works in apparent-temperature space: the reference readings are converted to the apparent temperature of each panel (its true temperature through the panel emissivity), the fit maps raw sensor values to those, m and b are applied to the raw survey pixels, and the result is converted to surface temperature with the scene emissivity (vegetation about 0.97 to 0.99). Broadband grey-body approximation:
 
 ```
 T_app⁴ = ε · T_obj⁴ + (1 − ε) · T_sky⁴
