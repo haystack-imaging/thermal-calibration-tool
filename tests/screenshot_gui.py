@@ -13,7 +13,8 @@ Usage:
 Config file (JSON):
     {"title": "...", "calibration": [{"file": "...tif", "panels": {"black": [[x,y],...4 corners], ...},
                                        "gun": {"black": 45.6, ...}}, ...],
-     "survey_folder": "...", "output_folder": "...", "zoom": {"at": [x, y], "notches": 1}, "loupe_target": 2}
+     "survey_folder": "...", "output_folder": "...", "zoom": {"at": [x, y], "notches": 1} or
+     "view": {"scale": 1.6, "center": [x, y]}, "loupe_target": 2}
 Needs `import` (ImageMagick) on PATH.
 """
 import argparse
@@ -99,10 +100,20 @@ def main():
     app._on_calib_select(None)
     settle(root, 4)
     cv = app.view.canvas
-    zx, zy = cfg.get("zoom", {}).get("at", [320, 256])
-    cx, cy = app.view.to_canvas(zx, zy)
-    for _ in range(int(cfg.get("zoom", {}).get("notches", 1))):
-        cv.event_generate('<Button-4>', x=int(cx), y=int(cy))
+    if "view" in cfg:                          # explicit scale and image-space centre
+        W, H = app.view.size()
+        app.view.scale = float(cfg["view"]["scale"])
+        vcx, vcy = cfg["view"]["center"]
+        app.view.ox, app.view.oy = vcx - W / (2 * app.view.scale), vcy - H / (2 * app.view.scale)
+        app.view.fitted = False
+        app.view._clamp()
+        app.view.redraw()
+        cx, cy = app.view.to_canvas(vcx, vcy)
+    else:                                      # wheel notches at a point, through real events
+        zx, zy = cfg.get("zoom", {}).get("at", [320, 256])
+        cx, cy = app.view.to_canvas(zx, zy)
+        for _ in range(int(cfg.get("zoom", {}).get("notches", 1))):
+            cv.event_generate('<Button-4>', x=int(cx), y=int(cy))
     settle(root, 3)
     cv.event_generate('<Motion>', x=int(cx) + 40, y=int(cy) + 30)
     shoot(root, "GUI_Home.png")
