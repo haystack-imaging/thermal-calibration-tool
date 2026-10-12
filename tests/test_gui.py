@@ -181,6 +181,11 @@ def test_title_entry_and_menu(app):
 
 
 def test_mode_switch_updates_chrome(app, tmp_path):
+    assert all(b.instate(['!disabled']) for b in app.mode_buttons), "sensor type is free while no image is loaded"
+    w, chain = app.mode_buttons[0], []
+    while w is not None and w is not app.steps[1].body:
+        chain.append(w); w = w.master
+    assert w is app.steps[1].body, "the sensor selector lives in step 1, not in the top bar"
     app.sensor_mode.set(tct.MODE_MSI)
     app._on_mode_switch()
     assert app.msi_method_frame.winfo_manager() and not app.emis_frame.winfo_manager()
@@ -205,7 +210,7 @@ def test_drawing_flow_with_readout_and_overlay(app, tmp_path):
     readout = app.view.canvas.find_withtag('readout')
     assert readout, "value readout follows the cursor"
     texts = [app.view.canvas.itemcget(i, 'text') for i in readout if app.view.canvas.type(i) == 'text']
-    assert texts and "T1: 3/4" in texts[0] and "15.00 °C" in texts[0]
+    assert texts and "T1: corner 4 of 4" in texts[0] and "15.00 °C" in texts[0]
     app._on_image_click(*poly("T1")[3])
     t = app.calibration_events[0].targets[0]
     assert not app.drawing_polygon and t.polygon == poly("T1") and t.drone_mean == pytest.approx(15.0)
@@ -231,3 +236,130 @@ def test_remove_image_and_empty_state(app, tmp_path):
     app._remove_calibration_image()
     assert app.calibration_events == [] and app.current_image is None
     assert app.image_name_label.cget("text") == "No image" and not app.steps[1].done
+
+
+# ----------------------------------------------------------------------------- UX round 2 (12 Oct 2026)
+def test_sensor_type_locks_once_images_are_loaded(app, tmp_path):
+    p = write_tif(tmp_path / "cal.tif", scene(), T0)
+    app._add_calibration_images([p])
+    assert all(b.instate(['disabled']) for b in app.mode_buttons)
+    assert "Locked" in app.mode_lock_label.cget("text") and app.mode_lock_label.winfo_manager()
+    app.calib_listbox.selection_set(0)
+    app._remove_calibration_image()
+    assert all(b.instate(['!disabled']) for b in app.mode_buttons) and not app.mode_lock_label.winfo_manager()
+    app._add_calibration_images([p])
+    import tkinter.messagebox as mb
+    mb.askyesno = lambda *a, **k: True
+    app._new_project()
+    assert all(b.instate(['!disabled']) for b in app.mode_buttons) and app.sensor_mode.get() == tct.MODE_THERMAL
+
+
+def test_guidance_walks_a_first_time_user_through_step_2(app, tmp_path):
+    guide = lambda: app.guide_label.cget("text")
+    assert "Add calibration images" in guide()
+    a = write_tif(tmp_path / "a.tif", scene(), T0)
+    b = write_tif(tmp_path / "b.tif", scene(), T0 + dt.timedelta(minutes=20))
+    app._add_calibration_images([a, b])
+    assert guide().startswith("Draw T1 on shot 1 of 2") and app.target_rows[0].highlighted and not app.target_rows[1].highlighted
+    app._start_polygon_selection(0)
+    assert guide() == "Click corner 1 of 4 for T1."
+    app._on_image_click(*poly("T1")[0])
+    assert guide() == "Click corner 2 of 4 for T1."
+    for pt in poly("T1")[1:]:
+        app._on_image_click(*pt)
+    assert guide().startswith("Type the thermometer reading for T1") and app.target_rows[0].highlighted
+    assert app.root.focus_get() in (app.target_rows[0].gt_entry, None), "focus jumps into the reading field"
+    app.target_rows[0].gt_var.set("15")
+    assert guide().startswith("Draw T2 on shot 1 of 2") and app.target_rows[1].highlighted and not app.target_rows[0].highlighted
+    app._start_polygon_selection(1)
+    for pt in poly("T2"):
+        app._on_image_click(*pt)
+    app.target_rows[1].gt_var.set("25")
+    assert guide().startswith("Shot 1 is done. Press › and draw the same targets on shot 2")
+    assert not any(r.highlighted for r in app.target_rows)
+    app._step_image(1)
+    assert app.current_event_index == 1 and guide().startswith("Draw T1 on shot 2 of 2")
+    for j, name in enumerate(("T1", "T2")):
+        app._start_polygon_selection(j)
+        for pt in poly(name):
+            app._on_image_click(*pt)
+        app.target_rows[j].gt_var.set(str(15 + 10 * j))
+    assert guide().startswith("All shots are done.")
+    app.target_rows[0].gt_var.set("")                      # a reading removed again → back to that step
+    assert "Type the thermometer reading for T1" in guide()
+
+
+def test_redraw_hides_the_old_polygon_at_once_and_esc_restores_it(app, tmp_path):
+    p = write_tif(tmp_path / "cal.tif", scene(), T0)
+    app._add_calibration_images([p])
+    app.root.update()
+    t = app.calibration_events[0].targets[0]
+    app._start_polygon_selection(0)
+    for pt in poly("T1"):
+        app._on_image_click(*pt)
+    c = app.view.canvas
+    labels = lambda: [c.itemcget(i, 'text') for i in c.find_withtag('overlay') if c.type(i) == 'text']
+    assert any(s.startswith("T1 ") for s in labels()), "polygon label on the image"
+    app._start_polygon_selection(0)                        # redraw: the old outline is gone immediately
+    assert not any(s.startswith("T1") for s in labels())
+    assert t.polygon == poly("T1"), "data kept until the new polygon is complete"
+    assert "redrawing" in app.target_rows[0].stats_label.cget("text")
+    app._on_image_click(1, 1)
+    app._cancel_drawing()                                  # Esc: the old polygon is back
+    assert any(s.startswith("T1 ") for s in labels()) and t.polygon == poly("T1")
+    assert "mean 15.00" in app.target_rows[0].stats_label.cget("text")
+    app._start_polygon_selection(0)
+    for pt in poly("T2"):
+        app._on_image_click(*pt)
+    assert t.polygon == poly("T2") and t.drone_mean == pytest.approx(30.0)
+
+
+def test_enter_moves_to_the_next_reading_field(app, tmp_path):
+    p = write_tif(tmp_path / "cal.tif", scene(), T0)
+    app._add_calibration_images([p])
+    app.root.update()
+    app.target_rows[0].gt_var.set("15")
+    app._on_gt_enter(0)
+    assert app.root.focus_get() in (app.target_rows[1].gt_entry, None)
+    app._on_gt_enter(1)                                    # last field: focus leaves the table
+    assert app.root.focus_get() in (app.root, None)
+
+
+def test_targets_can_be_named_and_names_are_shared(app, tmp_path):
+    a = write_tif(tmp_path / "a.tif", scene(), T0)
+    b = write_tif(tmp_path / "b.tif", scene(), T0 + dt.timedelta(minutes=20))
+    app._add_calibration_images([a, b])
+    app.root.update()
+    row = app.target_rows[0]
+    row.begin_rename()
+    row.name_entry.delete(0, 'end'); row.name_entry.insert(0, "black")
+    row.end_rename(True)
+    assert all(e.targets[0].name == "black" for e in app.calibration_events)
+    assert row.alias_label.cget("text") == "black" and row.alias_label.winfo_manager()
+    assert "T1 black" in app.guide_label.cget("text")
+    app._start_polygon_selection(0)
+    for pt in poly("T1"):
+        app._on_image_click(*pt)
+    c = app.view.canvas
+    assert any(c.itemcget(i, 'text').startswith("T1 black") for i in c.find_withtag('overlay') if c.type(i) == 'text')
+    assert tct.target_label(0, "Target 1") == "T1" and tct.target_label(2, "white") == "T3 white"
+    app._add_target()
+    assert app.calibration_events[0].targets[2].name == "Target 3"
+    app._remove_target(1)                                  # renumbering keeps the custom name
+    assert [t.name for t in app.calibration_events[0].targets] == ["black", "Target 2"]
+    row = app.target_rows[0]                               # the table was rebuilt (count changed)
+    assert row.alias_label.cget("text") == "black"
+    row.begin_rename(); row.name_entry.delete(0, 'end'); row.end_rename(True)
+    assert all(e.targets[0].name == "Target 1" for e in app.calibration_events) and not row.alias_label.winfo_manager()
+
+
+def test_empty_canvas_shows_a_hint_and_window_title_follows_the_project(app):
+    app.root.update()
+    c = app.view.canvas
+    texts = [c.itemcget(i, 'text') for i in c.find_withtag('placeholder')]
+    assert texts and "No calibration image yet" in texts[0]
+    assert app.root.title() == tct.TOOL_NAME
+    app.project_var.set("Flight 7")
+    assert app.root.title().startswith("Flight 7")
+    app.project_var.set("untitled project")
+    assert app.root.title() == tct.TOOL_NAME

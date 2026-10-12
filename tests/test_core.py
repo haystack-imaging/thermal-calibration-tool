@@ -374,7 +374,7 @@ def test_h7_switching_image_cancels_drawing(app, tmp_path):
     ev_a.targets[0].polygon = poly("T1")
     app._start_polygon_selection(0)
     app._on_image_click(20, 20); app._on_image_click(50, 20)
-    assert app.drawing_polygon and ev_a.targets[0].polygon == poly("T1"), "old polygon kept while drawing"
+    assert app.drawing_polygon and ev_a.targets[0].polygon == poly("T1"), "old polygon data kept while drawing (hidden on the image)"
     app.calib_listbox.selection_clear(0, 'end'); app.calib_listbox.selection_set(1)
     app._on_calib_select(None)
     assert not app.drawing_polygon and app.current_event_index == 1

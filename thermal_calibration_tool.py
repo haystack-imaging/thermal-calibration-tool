@@ -96,6 +96,16 @@ PROJECT_EXT = ".calib.json"
 # DATA CLASSES
 # =============================================================================
 
+def is_default_target_name(name: str) -> bool:
+    """'Target 3' (what add_target assigns) or empty; anything else was typed by the user."""
+    return not name.strip() or re.fullmatch(r"Target \d+", name.strip()) is not None
+
+
+def target_label(index: int, name: str) -> str:
+    """'T1' for a default name, 'T1 black' for a user-named target."""
+    return f"T{index + 1}" if is_default_target_name(name) else f"T{index + 1} {name.strip()}"
+
+
 @dataclass
 class CalibrationTarget:
     """One reference target on one calibration image."""
@@ -247,8 +257,9 @@ class CalibrationEvent:
         if len(self.targets) <= min_targets or not (0 <= index < len(self.targets)):
             return False
         self.targets.pop(index)
-        for i, t in enumerate(self.targets):       # keep names and colours in order
-            t.name = f'Target {i + 1}'
+        for i, t in enumerate(self.targets):       # keep default names and colours in order; custom names stay
+            if is_default_target_name(t.name):
+                t.name = f'Target {i + 1}'
             t.color = COLOR_PALETTE[i % len(COLOR_PALETTE)]
         return True
 
@@ -1439,8 +1450,9 @@ def setup_theme(root: tk.Tk) -> Dict[str, Any]:
     style.map('Accent.TButton', background=[('active', UI['accent_dark']), ('disabled', '#a7c4ba')],
               foreground=[('disabled', '#ffffff')])
     style.configure('Toolbutton', padding=(9, 3), background=UI['panel'], relief='flat', borderwidth=1)
-    style.map('Toolbutton', background=[('selected', UI['text']), ('active', '#e9ece7')],
-              foreground=[('selected', '#ffffff')])
+    style.map('Toolbutton', background=[('disabled selected', '#9aa39d'), ('disabled', '#f3f4f1'),
+                                        ('selected', UI['text']), ('active', '#e9ece7')],
+              foreground=[('disabled selected', '#ffffff'), ('disabled', UI['muted']), ('selected', '#ffffff')])
     style.configure('TCheckbutton', background=UI['bg'])
     style.configure('TRadiobutton', background=UI['bg'])
     style.configure('TEntry', fieldbackground=UI['panel'], padding=3)
@@ -1524,6 +1536,7 @@ class ZoomCanvas:
         self._loupe_photo = None
         self._pan_last = None
         self.loupe_enabled = False
+        self.placeholder = ""                           # shown centred while there is no image
         c = self.canvas
         c.bind('<Configure>', self._on_configure)
         c.bind('<Button-1>', self._on_click)
@@ -1552,7 +1565,7 @@ class ZoomCanvas:
         same = self.rgb is not None and rgb is not None and rgb.shape[:2] == self.rgb.shape[:2]
         self.rgb = rgb
         if rgb is None:
-            self.canvas.delete('all')
+            self._draw_placeholder()
             return
         if not (keep_view and same and not self.fitted):
             self.fit()
@@ -1604,10 +1617,24 @@ class ZoomCanvas:
     # --- events --------------------------------------------------------------
     def _on_configure(self, event):
         if self.rgb is None:
+            self._draw_placeholder()
             return
         if self.fitted:
             self.fit()
         self.redraw()
+
+    def set_placeholder(self, text: str):
+        self.placeholder = text
+        if self.rgb is None:
+            self._draw_placeholder()
+
+    def _draw_placeholder(self):
+        c = self.canvas
+        c.delete('all')
+        if self.placeholder:
+            W, H = self.size()
+            c.create_text(W / 2, H / 2, text=self.placeholder, fill='#9aa39d', font=('TkDefaultFont', 12),
+                          justify='center', width=max(200, W - 80), tags='placeholder')
 
     def _wheel(self, event, direction: int):
         self.zoom_at(event.x, event.y, 1.25 if direction > 0 else 0.8)
@@ -1658,6 +1685,7 @@ class ZoomCanvas:
         c = self.canvas
         c.delete('all')
         if self.rgb is None:
+            self._draw_placeholder()
             return
         W, H = self.size()
         h, w = self.rgb.shape[:2]
@@ -1769,20 +1797,31 @@ class StepSection:
 class TargetRowWidget:
     """One row of the target table: colour, name, Draw/Clear, ground-truth entry, ROI statistics."""
 
-    def __init__(self, parent, index: int, color: str, on_draw, on_clear, on_remove, on_gt_change, fonts=None):
+    def __init__(self, parent, index: int, color: str, on_draw, on_clear, on_remove, on_gt_change, fonts=None,
+                 on_enter=None, on_rename=None):
         self.index, self.color, self.on_gt_change = index, color, on_gt_change
+        self.on_enter, self.on_rename = on_enter, on_rename
         fonts = fonts or {}
+        self.fonts = fonts
         self.frame = tk.Frame(parent, bg=UI['panel'])
         self.frame.pack(fill=tk.X)
-        tk.Frame(self.frame, bg=UI['divider'], height=1).pack(fill=tk.X, side=tk.TOP)
+        self.divider = tk.Frame(self.frame, bg=UI['divider'], height=1)
+        self.divider.pack(fill=tk.X, side=tk.TOP)
         # line 1: swatch, name, Draw/Clear, reference entry, remove. Packed left to right, no weighted
         # column that could be squeezed to nothing in a narrow panel.
-        row = tk.Frame(self.frame, bg=UI['panel'])
+        self.row = row = tk.Frame(self.frame, bg=UI['panel'])
         row.pack(fill=tk.X, padx=6, pady=(4, 0))
         self.swatch = tk.Label(row, bg=color, width=1, height=1, font=fonts.get('tiny'))
         self.swatch.pack(side=tk.LEFT, padx=(2, 6))
-        self.name_label = tk.Label(row, text=f"T{index + 1}", width=3, bg=UI['panel'], fg=UI['text'], font=fonts.get('bold'), anchor='w')
+        self.name_label = tk.Label(row, text=f"T{index + 1}", width=3, bg=UI['panel'], fg=UI['text'], font=fonts.get('bold'),
+                                   anchor='w', cursor='hand2')
         self.name_label.pack(side=tk.LEFT)
+        self.name_label.bind('<Double-Button-1>', lambda e: self.begin_rename())
+        ToolTip(self.name_label, "Double-click to name this target (e.g. black, grey, white). The name appears on "
+                                 "the image, in the guidance and in the processing summary.")
+        self.alias_label = tk.Label(row, text="", bg=UI['panel'], fg=UI['muted'], font=fonts.get('small'), anchor='w', cursor='hand2')
+        self.alias_label.bind('<Double-Button-1>', lambda e: self.begin_rename())
+        self.name_entry: Optional[tk.Entry] = None
         self.draw_btn = ttk.Button(row, text="Draw", width=5, style='Small.TButton', command=lambda: on_draw(self.index))
         self.draw_btn.pack(side=tk.LEFT, padx=1)
         self.clear_btn = ttk.Button(row, text="Clear", width=5, style='Small.TButton', command=lambda: on_clear(self.index))
@@ -1794,12 +1833,69 @@ class TargetRowWidget:
                                  highlightthickness=0, insertbackground=UI['text'])
         self.gt_entry.pack(side=tk.LEFT, padx=6)
         self.gt_var.trace_add('write', self._on_gt_modified)
+        self.gt_entry.bind('<Return>', lambda e: self.on_enter(self.index) if self.on_enter else None)
+        self.gt_entry.bind('<KP_Enter>', lambda e: self.on_enter(self.index) if self.on_enter else None)
         self.remove_btn = ttk.Button(row, text="×", width=2, style='Small.TButton', command=lambda: on_remove(self.index))
         self.remove_btn.pack(side=tk.RIGHT, padx=2)
         # line 2: ROI statistics, full width so they are never cut off
         self.stats_label = tk.Label(self.frame, text="–", bg=UI['panel'], fg=UI['muted'], font=fonts.get('mono_small'), anchor='w')
         self.stats_label.pack(fill=tk.X, padx=(34, 6), pady=(0, 4))
         self._suspend = False
+        self._name = ""
+        self.highlighted = False
+
+    # --- naming -------------------------------------------------------------
+    def set_name(self, name: str):
+        """Shows the user's name next to the ID (nothing for the default 'Target n')."""
+        self._name = "" if is_default_target_name(name) else name.strip()
+        if self._name:
+            self.alias_label.config(text=self._name)
+            if not self.alias_label.winfo_manager():
+                self.alias_label.pack(side=tk.LEFT, padx=(0, 4), before=self.draw_btn)
+        else:
+            self.alias_label.pack_forget()
+
+    def begin_rename(self):
+        if self.name_entry is not None:
+            return
+        e = tk.Entry(self.row, width=9, font=self.fonts.get('small'), relief='solid', bd=1, bg=UI['panel'],
+                     highlightthickness=0, insertbackground=UI['text'])
+        e.insert(0, self._name)
+        e.pack(side=tk.LEFT, padx=(0, 4), before=self.draw_btn)
+        self.alias_label.pack_forget()
+        e.bind('<Return>', lambda ev: self.end_rename(True))
+        e.bind('<KP_Enter>', lambda ev: self.end_rename(True))
+        e.bind('<Escape>', lambda ev: self.end_rename(False))
+        e.bind('<FocusOut>', lambda ev: self.end_rename(True))
+        e.focus_set()
+        e.select_range(0, tk.END)
+        self.name_entry = e
+
+    def end_rename(self, commit: bool):
+        e = self.name_entry
+        if e is None:
+            return
+        self.name_entry = None
+        try:
+            name = e.get().strip()[:16]
+            e.destroy()
+        except tk.TclError:                     # the table was rebuilt while the entry was open
+            return
+        if commit and self.on_rename:
+            self.on_rename(self.index, name)
+        else:
+            self.set_name(self._name)
+
+    # --- state --------------------------------------------------------------
+    def set_highlight(self, on: bool):
+        """The row the guidance talks about gets the accent background and a bold Draw button."""
+        if on == self.highlighted:
+            return
+        self.highlighted = on
+        bg = UI['accent_soft'] if on else UI['panel']
+        for w in (self.frame, self.row, self.name_label, self.alias_label, self.stats_label):
+            w.config(bg=bg)
+        self.name_label.config(fg=UI['accent'] if on else UI['text'])
 
     def _on_gt_modified(self, *args):
         valid = True
@@ -2358,11 +2454,16 @@ class ThermalCalibrationApp:
 
         self._build_menu()
         self._build_ui()
+        self.project_var.trace_add('write', lambda *a: self._update_window_title())
+        self._update_window_title()
+        self.view.set_placeholder("No calibration image yet.\n\nChoose the sensor type and add the images that show "
+                                  "your reference targets (1 · Images, left).")
         self.root.bind('<Escape>', lambda e: self._cancel_drawing())
         self.root.bind('<Control-s>', lambda e: self._save_project())
         self.root.bind('<Control-o>', lambda e: self._open_project())
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.show_step(1)
+        self._update_step_summaries()           # summaries, guidance card and mode lock from the first second
         self.root.after(150, self._poll_queue)
 
     # ------------------------------------------------------------------ build
@@ -2400,16 +2501,6 @@ class ThermalCalibrationApp:
         self.title_entry.bind('<Return>', lambda e: self._on_title_edited(True))
         self.title_entry.bind('<FocusOut>', lambda e: self._on_title_edited(False))
         tk.Label(top, textvariable=self.saved_var, bg=UI['panel'], fg=UI['muted'], font=f['small']).pack(side=tk.LEFT, padx=8)
-        self.msi_method_frame = tk.Frame(top, bg=UI['panel'])
-        for text, val in (("Single point", True), ("Multi point", False)):
-            ttk.Radiobutton(self.msi_method_frame, text=text, style='Toolbutton', variable=self.msi_single_point, value=val,
-                            command=self._on_single_point_toggle).pack(side=tk.LEFT)
-        mode = tk.Frame(top, bg=UI['panel'], highlightthickness=1, highlightbackground=UI['border'])
-        mode.pack(side=tk.RIGHT, padx=18, pady=10)
-        ttk.Radiobutton(mode, text="Thermal", style='Toolbutton', variable=self.sensor_mode, value=MODE_THERMAL,
-                        command=self._on_mode_switch).pack(side=tk.LEFT)
-        ttk.Radiobutton(mode, text="Multispectral", style='Toolbutton', variable=self.sensor_mode, value=MODE_MSI,
-                        command=self._on_mode_switch).pack(side=tk.LEFT)
         tk.Frame(self.root, bg=UI['border'], height=1).pack(fill=tk.X)
 
         body = tk.Frame(self.root, bg=UI['bg'])
@@ -2496,8 +2587,36 @@ class ThermalCalibrationApp:
 
     def _build_step_images(self, body):
         f = self.fonts
+        # sensor type first: it decides what the images and the reference values mean, so it is chosen
+        # before any image is loaded and locked afterwards (File › New project unlocks it)
+        self.sensor_box = tk.Frame(body, bg=UI['bg'])
+        self.sensor_box.pack(fill=tk.X, pady=(2, 4))
+        srow = tk.Frame(self.sensor_box, bg=UI['bg'])
+        srow.pack(fill=tk.X)
+        tk.Label(srow, text="Sensor", bg=UI['bg'], fg=UI['text'], font=f['small'], width=7, anchor='w').pack(side=tk.LEFT)
+        mode = tk.Frame(srow, bg=UI['panel'], highlightthickness=1, highlightbackground=UI['border'])
+        mode.pack(side=tk.LEFT)
+        self.mode_buttons = [ttk.Radiobutton(mode, text="Thermal", style='Toolbutton', variable=self.sensor_mode,
+                                             value=MODE_THERMAL, command=self._on_mode_switch),
+                             ttk.Radiobutton(mode, text="Multispectral", style='Toolbutton', variable=self.sensor_mode,
+                                             value=MODE_MSI, command=self._on_mode_switch)]
+        for b in self.mode_buttons:
+            b.pack(side=tk.LEFT)
+        self.mode_lock_icon = help_icon(srow, "", side=tk.LEFT, padx=6)
+        self.mode_lock_label = tk.Label(self.sensor_box, text="", bg=UI['bg'], fg=UI['muted'], font=f['tiny'],
+                                        anchor='w', justify='left', wraplength=280)
+        self.msi_method_frame = tk.Frame(self.sensor_box, bg=UI['bg'])
+        tk.Label(self.msi_method_frame, text="Method", bg=UI['bg'], fg=UI['text'], font=f['small'], width=7, anchor='w').pack(side=tk.LEFT)
+        mf = tk.Frame(self.msi_method_frame, bg=UI['panel'], highlightthickness=1, highlightbackground=UI['border'])
+        mf.pack(side=tk.LEFT)
+        for text, val in (("Single point", True), ("Multi point", False)):
+            ttk.Radiobutton(mf, text=text, style='Toolbutton', variable=self.msi_single_point, value=val,
+                            command=self._on_single_point_toggle).pack(side=tk.LEFT)
+        help_icon(self.msi_method_frame, "Single point: one panel of known reflectance, the line goes through the origin "
+                                         "(DN = 0 ↔ ρ = 0). Multi point: two or more panels, slope and offset are fitted.",
+                  side=tk.LEFT, padx=6)
         row = tk.Frame(body, bg=UI['bg'])
-        row.pack(fill=tk.X, pady=(2, 6))
+        row.pack(fill=tk.X, pady=(6, 6))
         ttk.Button(row, text="Add images…", style='Accent.TButton', command=self._load_calibration_images).pack(side=tk.LEFT)
         ttk.Button(row, text="Remove", command=self._remove_calibration_image).pack(side=tk.LEFT, padx=6)
         help_icon(row, "Images that show the reference targets. One image is enough (its coefficients are used for the "
@@ -2516,6 +2635,17 @@ class ThermalCalibrationApp:
 
     def _build_step_targets(self, body):
         f = self.fonts
+        # the guidance card: always states the one thing to do next (first-time users read this, not the manual)
+        self.guide_card = tk.Frame(body, bg=UI['accent_soft'], highlightthickness=1, highlightbackground=UI['accent'])
+        self.guide_card.pack(fill=tk.X, pady=(2, 8))
+        self.guide_kicker = tk.Label(self.guide_card, text="NEXT", bg=UI['accent_soft'], fg=UI['accent'], font=f['tiny'], anchor='w')
+        self.guide_kicker.pack(fill=tk.X, padx=10, pady=(6, 0))
+        self.guide_label = tk.Label(self.guide_card, text="", bg=UI['accent_soft'], fg=UI['text'], font=f['small_bold'],
+                                    justify='left', anchor='w', wraplength=270)
+        self.guide_label.pack(fill=tk.X, padx=10, pady=(0, 2))
+        self.guide_detail = tk.Label(self.guide_card, text="", bg=UI['accent_soft'], fg=UI['muted'], font=f['tiny'],
+                                     justify='left', anchor='w', wraplength=270)
+        self.guide_detail.pack(fill=tk.X, padx=10, pady=(0, 6))
         nav = tk.Frame(body, bg=UI['bg'])
         nav.pack(fill=tk.X, pady=(2, 6))
         ttk.Button(nav, text="‹", style='Small.TButton', width=2, command=lambda: self._step_image(-1)).pack(side=tk.LEFT)
@@ -2671,6 +2801,114 @@ class ThermalCalibrationApp:
         self.steps[4].set_done(out is not None, (f"written to {os.path.basename(out)}" if out else
                                                  (f"{len(self._survey_timestamps)} survey images, not processed yet"
                                                   if self._survey_timestamps else "choose the survey folder")))
+        self._update_mode_lock()
+        self._update_guidance()
+
+    def _update_mode_lock(self):
+        locked = bool(self.calibration_events)
+        if not hasattr(self, 'mode_buttons') or locked == getattr(self, '_mode_locked', None):
+            return
+        self._mode_locked = locked
+        for b in self.mode_buttons:
+            b.state(['disabled'] if locked else ['!disabled'])
+        text = ("Locked while calibration images are loaded: the sensor type decides how images and reference values "
+                "are read. File › New project to start over with the other type." if locked else
+                "Thermal: temperature TIFFs and thermometer readings in °C. Multispectral: one band at a time, "
+                "reflectance panels with known ρ.")
+        if locked:
+            self.mode_lock_label.config(text="Locked while images are loaded. File › New project to change the sensor type.")
+            self.mode_lock_label.pack(fill=tk.X, pady=(2, 0), after=self.mode_buttons[0].master.master)
+        else:
+            self.mode_lock_label.pack_forget()
+        self.mode_lock_icon.unbind("<Enter>")
+        self.mode_lock_icon.unbind("<Leave>")
+        ToolTip(self.mode_lock_icon, text)
+
+    def _next_action(self) -> Tuple[str, str, Optional[int], Optional[int]]:
+        """What a user has to do next in step 2: (headline, detail, target index to highlight, shot index)."""
+        evs = self.calibration_events
+        if not evs:
+            return ("Add calibration images in 1 · Images.", "Then draw the targets here.", None, None)
+        ev = self._current_event()
+        i = self.current_event_index
+        n = len(evs)
+        shot = f"shot {i + 1} of {n}" if n > 1 else "the shot"
+        unit = "°C" if self._is_thermal() else "ρ"
+        value = "the thermometer reading" if self._is_thermal() else "the panel's known reflectance (0–1)"
+        targets = self._visible_targets(ev)
+        if self.drawing_polygon and self.active_target_index < len(targets):
+            t = targets[self.active_target_index]
+            k = len(self.polygon_points)
+            return (f"Click corner {k + 1} of 4 for {target_label(self.active_target_index, t.name)}.",
+                    "Any order; the loupe top-left magnifies the pixels under the cursor. Esc cancels.",
+                    self.active_target_index, i)
+        for j, t in enumerate(targets):        # one target at a time: draw it, then type its reading
+            if not t.has_polygon():
+                return (f"Draw {target_label(j, t.name)} on {shot}: press Draw, then click the 4 corners of the panel.",
+                        "Zoom in with the mouse wheel first so the panel is large; the dashed outline is the region used.",
+                        j, i)
+            if t.drone_mean is None or not math.isfinite(t.drone_mean):
+                return (f"{target_label(j, t.name)} lies outside the image or over empty pixels: press Draw and redraw it.",
+                        "", j, i)
+            if t.ground_truth is None or not math.isfinite(t.ground_truth):
+                return (f"Type {value} for {target_label(j, t.name)} into the {unit} field.",
+                        "Comma or dot. Enter jumps to the next field." if self._is_thermal() else
+                        "e.g. 50 % → 0.5. Enter jumps to the next field.", j, i)
+        need = 1 if self._is_single_point() else 2
+        if len(targets) < need:
+            return ("Press + Add target: at least 2 targets are needed for a line.", "", None, i)
+        todo = [k for k, e in enumerate(evs) if k != i and not all(t.is_complete() for t in self._visible_targets(e))]
+        if todo:
+            k = todo[0]
+            return (f"Shot {i + 1} is done. Press › and draw the same targets on shot {k + 1}.",
+                    "Each shot needs its own polygons and readings: the panels and their temperatures change "
+                    "between shots. Copy to other shots helps when the camera did not move.", None, k)
+        if n == 1:
+            return ("All targets are done. Check the fit on the right, then open 4 · Process.",
+                    "A single shot is fine: its coefficients are applied to the whole flight. Add a second "
+                    "(end-of-flight) shot in 1 · Images to correct drift.", None, i)
+        return ("All shots are done. Check the fits on the right, then open 4 · Process.",
+                "Switch shots with ‹ › to compare their fits; the timeline below the image shows the drift.", None, i)
+
+    def _update_guidance(self):
+        if not hasattr(self, 'guide_label'):
+            return
+        head, detail, t_idx, _ = self._next_action()
+        self.guide_label.config(text=head)
+        self.guide_detail.config(text=detail)
+        if detail:
+            if not self.guide_detail.winfo_manager():
+                self.guide_detail.pack(fill=tk.X, padx=10, pady=(0, 6))
+        else:
+            self.guide_detail.pack_forget()
+        for j, row in enumerate(self.target_rows):
+            row.set_highlight(j == t_idx)
+
+    def _on_gt_enter(self, index: int):
+        """Enter in a reading field: next target's field, or leave the field when it was the last one."""
+        if index + 1 < len(self.target_rows):
+            nxt = self.target_rows[index + 1].gt_entry
+            nxt.focus_set()
+            nxt.select_range(0, tk.END)
+        else:
+            self.root.focus_set()
+        self._update_guidance()
+
+    def _rename_target(self, index: int, name: str):
+        """Names are shared like the targets themselves: the same index is renamed on every shot."""
+        ev = self._current_event()
+        if ev is None:
+            return
+        new = name.strip() or f"Target {index + 1}"
+        for e in self.calibration_events:
+            if index < len(e.targets):
+                e.targets[index].name = new
+        if index < len(self.target_rows):
+            self.target_rows[index].set_name(new)
+        self.view.redraw()
+        self._update_guidance()
+        self.status_var.set(f"T{index + 1} is now called '{new}' on all shots." if not is_default_target_name(new)
+                            else f"T{index + 1} has no name.")
 
     # --------------------------------------------------------------- helpers
     def _bind_panel_wheel(self, on: bool):
@@ -2742,12 +2980,12 @@ class ThermalCalibrationApp:
             self.msi_method_frame.pack_forget()
             self.emis_frame.pack(fill=tk.X, pady=(8, 0))
         else:
-            self.msi_method_frame.pack(side=tk.RIGHT, padx=(0, 4), pady=10)
+            self.msi_method_frame.pack(fill=tk.X, pady=(4, 0))
             self.emis_frame.pack_forget()
         self.gt_header_label.config(text=self._gt_label())
         self._update_targets_tooltip()
         self._on_single_point_toggle()
-        self.status_var.set(f"Switched to {'thermal' if thermal else 'multispectral'} mode.")
+        self.status_var.set(f"{'Thermal' if thermal else 'Multispectral'} mode.")
 
     def _on_single_point_toggle(self):
         single = self._is_single_point()
@@ -2829,7 +3067,7 @@ class ThermalCalibrationApp:
         if mtime:
             self.status_var.set(f"⚠ {len(mtime)} image(s) have no capture time in their metadata; the file date is used.")
         else:
-            self.status_var.set(f"{len(self.calibration_events)} calibration image(s). Go to step 2 and draw the targets.")
+            self.status_var.set(f"{len(self.calibration_events)} calibration image(s) loaded.")
         if self.active_step == 1 and added:
             self.show_step(2)
 
@@ -2900,7 +3138,8 @@ class ThermalCalibrationApp:
         self._rebuild_target_rows()
         self._recompute_fit(ev)
         self._update_display(keep_view=False)
-        self.status_var.set(f"Shot {index + 1} selected. Draw polygons and enter reference values for this image.")
+        self._update_guidance()
+        self.status_var.set(f"Shot {index + 1} of {n} selected.")
 
     # ------------------------------------------------------------- display
     def _cached_image(self, path: str) -> np.ndarray:
@@ -2938,6 +3177,8 @@ class ThermalCalibrationApp:
         for i, t in enumerate(targets):
             if not t.has_polygon():
                 continue
+            if self.drawing_polygon and i == self.active_target_index:
+                continue                       # being redrawn: the old outline is gone from the moment Draw was pressed
             pts = [self.view.to_canvas(x, y) for x, y in t.polygon]
             flat = [v for p in pts for v in p]
             closed = flat + flat[:2]
@@ -2949,7 +3190,7 @@ class ThermalCalibrationApp:
             for x, y in pts:
                 c.create_oval(x - 4, y - 4, x + 4, y + 4, fill=t.color, outline='white', width=1.5, tags='overlay')
             cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-            label = f"T{i + 1}" + (f" {t.drone_mean:.2f}" if t.drone_mean is not None and np.isfinite(t.drone_mean) else "")
+            label = target_label(i, t.name) + (f" {t.drone_mean:.2f}" if t.drone_mean is not None and np.isfinite(t.drone_mean) else "")
             tw = 7 * len(label) + 8
             c.create_rectangle(cx - tw / 2, cy - 10, cx + tw / 2, cy + 10, fill='white', outline=t.color, width=2, tags='overlay')
             c.create_text(cx, cy, text=label, fill=UI['text'], font=self.fonts['small_bold'], tags='overlay')
@@ -2989,13 +3230,15 @@ class ThermalCalibrationApp:
         val = self.current_image[iy, ix]
         text = f"{val:.2f} {self._unit()} · {ix}, {iy}"
         if self.drawing_polygon:
-            text += f" · T{self.active_target_index + 1}: {len(self.polygon_points)}/4"
+            text += f" · T{self.active_target_index + 1}: corner {len(self.polygon_points) + 1} of 4"
         if cx is not None:
             W, _ = self.view.size()
-            tx = cx + 14 if cx < W - 180 else cx - 14
-            anchor = 'w' if cx < W - 180 else 'e'
-            tid = c.create_text(tx, cy + 14, anchor=anchor, text=text, fill='white', font=self.fonts['mono_small'], tags='readout')
+            tid = c.create_text(cx + 14, cy + 14, anchor='w', text=text, fill='white', font=self.fonts['mono_small'], tags='readout')
             x0, y0, x1, y1 = c.bbox(tid)
+            if x1 + 4 > W:                      # would run off the right edge: flip to the left of the cursor
+                c.coords(tid, cx - 14, cy + 14)
+                c.itemconfigure(tid, anchor='e')
+                x0, y0, x1, y1 = c.bbox(tid)
             c.create_rectangle(x0 - 4, y0 - 2, x1 + 4, y1 + 2, fill='#141815', outline='', tags='readout')
             c.tag_raise(tid)
 
@@ -3006,14 +3249,23 @@ class ThermalCalibrationApp:
             self.status_var.set("Load and select a calibration image first.")
             return
         self._cancel_drawing(silent=True)
+        targets = self._visible_targets(ev)
+        if target_index >= len(targets):
+            return
         self.active_target_index = target_index
         self.drawing_polygon = True
         self.polygon_points = []
         self.view.loupe_enabled = True
         self.view.canvas.config(cursor='crosshair')
-        self.status_var.set(f"Drawing T{target_index + 1}: click the 4 corners of the panel (Esc cancels). "
-                            "The previous polygon is kept until the new one is complete.")
+        t = targets[target_index]
+        redo = t.has_polygon()
+        if redo and target_index < len(self.target_rows):   # old outline gone now; data stays until the new one is done
+            self.target_rows[target_index].stats_label.config(text="redrawing … (Esc keeps the old polygon)", fg=UI['muted'])
+        self.status_var.set(f"Drawing {target_label(target_index, t.name)}: click the 4 corners of the panel"
+                            + (" (Esc brings the old polygon back)." if redo else " (Esc cancels)."))
+        self.root.focus_set()                   # a reading field must not swallow the Esc key
         self.view.redraw()
+        self._update_guidance()
 
     def _cancel_drawing(self, silent: bool = False):
         if not self.drawing_polygon:
@@ -3023,9 +3275,11 @@ class ThermalCalibrationApp:
         self.view.loupe_enabled = False
         self.view.canvas.config(cursor='')
         self.view.canvas.delete('loupe')
+        self._refresh_rows_stats()              # "redrawing …" back to the old statistics
         self.view.redraw()
+        self._update_guidance()
         if not silent:
-            self.status_var.set("Drawing cancelled; the previous polygon is unchanged.")
+            self.status_var.set("Drawing cancelled; the previous polygon is back.")
 
     def _on_image_click(self, ix: int, iy: int):
         if not self.drawing_polygon or self.current_image is None:
@@ -3035,6 +3289,7 @@ class ThermalCalibrationApp:
             self._complete_polygon_drawing()
         else:
             self.view.redraw()
+            self._update_guidance()
 
     def _complete_polygon_drawing(self):
         ev = self._current_event()
@@ -3057,8 +3312,14 @@ class ThermalCalibrationApp:
             warn = " ⚠ polygon too small for the edge inset; the full polygon was used."
         elif not polygon_is_convex(target.polygon):
             warn = " ⚠ the polygon is not convex; check the corners."
-        self.status_var.set(f"T{self.active_target_index + 1}: mean {st.mean:.2f} {self._unit()} over {st.count} px. "
-                            f"Now enter its reference value.{warn}")
+        idx = self.active_target_index
+        self.status_var.set(f"{target_label(idx, target.name)}: mean {st.mean:.2f} {self._unit()} over {st.count} px."
+                            f"{warn}")
+        if idx < len(self.target_rows) and target.ground_truth is None:     # the reading is the natural next step
+            row = self.target_rows[idx]
+            row.gt_entry.focus_set()
+            row.gt_entry.select_range(0, tk.END)
+        self._update_guidance()
 
     def _clear_polygon(self, target_index: int):
         ev = self._current_event()
@@ -3072,7 +3333,7 @@ class ThermalCalibrationApp:
             self._refresh_rows_stats()
             self._recompute_fit(ev)
             self.view.redraw()
-            self.status_var.set(f"Cleared T{target_index + 1}.")
+            self.status_var.set(f"Cleared {target_label(target_index, t.name)} on this shot.")
 
     def _copy_polygons(self):
         ev = self._current_event()
@@ -3111,8 +3372,10 @@ class ThermalCalibrationApp:
             self.target_rows.clear()
             for i, t in enumerate(targets):
                 self.target_rows.append(TargetRowWidget(self.targets_container, i, t.color, self._start_polygon_selection,
-                                                        self._clear_polygon, self._remove_target, self._on_gt_change, self.fonts))
+                                                        self._clear_polygon, self._remove_target, self._on_gt_change, self.fonts,
+                                                        on_enter=self._on_gt_enter, on_rename=self._rename_target))
         for row, t in zip(self.target_rows, targets):   # same table: just refresh the values (no flash)
+            row.set_name(t.name)
             row.set_ground_truth(t.ground_truth)
             row.set_stats(t, unit)
 
@@ -3138,8 +3401,7 @@ class ThermalCalibrationApp:
                 e.add_target()
         self._rebuild_target_rows()
         self._update_step_summaries()
-        self.status_var.set(f"Added T{n} on all {len(self.calibration_events)} shot(s). Draw its polygon and enter the "
-                            "reference value on each shot.")
+        self.status_var.set(f"Added T{n} on all {len(self.calibration_events)} shot(s).")
 
     def _remove_target(self, index: int):
         """Removes the target from every calibration shot."""
@@ -3168,7 +3430,7 @@ class ThermalCalibrationApp:
         targets = self._visible_targets(ev)
         if index < len(targets):
             targets[index].ground_truth = self.target_rows[index].get_ground_truth()
-            self._recompute_fit(ev)
+            self._recompute_fit(ev)             # also refreshes the guidance (through the step summaries)
 
     # ---------------------------------------------------------------- fits
     def _recompute_fit(self, ev: CalibrationEvent):
@@ -3328,6 +3590,10 @@ class ThermalCalibrationApp:
         if commit:
             self.root.focus_set()
 
+    def _update_window_title(self):
+        title = self.project_var.get().strip()
+        self.root.title(f"{title} – {TOOL_NAME}" if title and title != "untitled project" else TOOL_NAME)
+
     def _project_dict(self) -> dict:
         survey = {"folder": self.survey_entry.get(), "filter": self.filter_var.get(),
                   "output_folder": self.output_entry.get(), "copy_metadata": self.copy_meta_var.get(),
@@ -3448,8 +3714,10 @@ class ThermalCalibrationApp:
 
     def _show_help(self):
         messagebox.showinfo("How to use",
-                            "1 · Images: add the calibration shot(s) that show your reference panels (single-band temperature TIFFs).\n"
-                            "2 · Targets: zoom in (wheel), press Draw for a target and click its 4 corners. Type the reference reading.\n"
+                            "1 · Images: choose the sensor type (thermal or multispectral; locked once images are loaded), then "
+                            "add the calibration shot(s) that show your reference panels (single-band temperature TIFFs).\n"
+                            "2 · Targets: the green card says what to do next. Zoom in (wheel), press Draw for a target and click "
+                            "its 4 corners, type the reference reading, repeat on every shot.\n"
                             "3 · Fit: watch the panel on the right. With 3 or more targets you get an uncertainty estimate.\n"
                             "4 · Process: choose the survey images and the output folder, press Check, then Run.\n\n"
                             "Save the project (Ctrl+S) to keep polygons and readings; it can be re-run from the command "

@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses semantic versioning.
 
-## [0.2.0] - 2026-10-10
+## [0.2.0] - 2026-10-12
 
 A review of the March release found several defects that produced wrong numbers silently. All of them
 are fixed and each has a regression test (`tests/test_core.py`). Anyone who processed data with 0.1.0
@@ -56,6 +56,13 @@ should re-run it; the cases below say when the old output was affected.
 - Zoom, pan, loupe, cursor readout and colour bar on the image view.
 - Four-step layout (Images, Targets, Fit, Process) with a flight timeline, a live fit panel and an editable
   project title. Targets are shared by all calibration shots.
+- Step 2 guidance card: states the next action (which target to draw on which shot, which reading to type,
+  when to switch shots) and highlights the row concerned; the reading field gets the focus after the fourth
+  corner and Enter moves to the next target. Targets can be named (double-click the ID); the name appears on
+  the image and in the processing summary.
+- The sensor type (thermal / multispectral) is chosen in step 1 and locked while images are loaded, so a
+  project cannot change mode halfway through. Redrawing a target hides its old outline at once (Esc restores
+  it); an empty image view says what to do first; the window title shows the project name.
 - Batch processing in a worker thread with Cancel and a live results table.
 - Project files (`*.calib.json`) and a headless command line (`--project FILE --run`); every run saves the
   project next to its outputs.

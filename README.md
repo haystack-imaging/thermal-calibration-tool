@@ -76,23 +76,30 @@ bar is editable (click it); File and Help are in the menu bar (Ctrl+O opens, Ctr
 
 ### 1 · Images
 
-**Add images**: the calibration shots that show the targets. They are sorted by capture time (XMP, EXIF or
-TIFF tag; the source is shown). One image is fine.
+Choose the **Sensor** (thermal or multispectral) first: it decides how images and reference values are read,
+so it is locked as soon as images are loaded (File › New project unlocks it). Then **Add images**: the
+calibration shots that show the targets. They are sorted by capture time (XMP, EXIF or TIFF tag; the source is
+shown). One image is fine.
 
 ### 2 · Targets
+
+The green **NEXT** card at the top of the step always names the one thing to do next (which target to draw on
+which shot, which reading to type, when to switch shots) and the row it talks about is highlighted.
 
 1. **Zoom in** with the mouse wheel until the targets are large; right-drag pans, Fit and 1:1 reset the view.
 2. For each target press **Draw** and click its 4 corners; a loupe in the corner magnifies the pixels under
    the cursor and the readout next to it shows the value. The row shows the ROI mean, its spread and the
    number of pixels used; the dashed outline on the image is the region actually used (edge inset, default 3 px).
-   **Esc** cancels a drawing; the previous polygon is kept until a new one is complete.
+   Redrawing a target removes its old outline the moment you press Draw; **Esc** cancels and brings it back.
 
    ![Placing a corner with the loupe](GUI_screenshots/GUI_Drawing_Loupe.png)
 
-3. Type the IR thermometer reading in the **truth** field (comma or dot).
+3. Type the IR thermometer reading in the **truth** field (comma or dot). The cursor is already there after
+   the fourth corner; **Enter** moves to the next target's field.
 4. Switch shots with ‹ › and repeat. Targets are shared by all shots: **+ Add target** adds it to every
    shot, × removes it everywhere; only the polygons and readings are per shot. **Copy to other shots** copies
-   polygons when the camera did not move.
+   polygons when the camera did not move. Double-click a target's ID to name it (black, grey, white …); the
+   name appears on the image, in the guidance and in the processing summary.
 
 ### 3 · Fit
 
