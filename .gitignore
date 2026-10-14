@@ -8,3 +8,10 @@ dist/
 # generated / downloaded test data (see tests/README.md)
 tests/data/
 tests/vendor/
+
+# Rust / Tauri rewrite (rust/)
+rust/target/
+rust/app/node_modules/
+rust/app/dist/
+rust/app/src-tauri/target/
+rust/app/src-tauri/gen/schemas/

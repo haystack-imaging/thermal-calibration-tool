@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project uses semantic versioning.
 
+## [Unreleased]
+
+### Added
+- `rust/`: a port of the engine to Rust (`thermal-core`, validated against the golden flight), a headless
+  CLI (`thermal-calibration`) and the beginnings of a Tauri desktop app with a web front-end. The Python
+  tool remains the release until the app is complete.
+
 ## [0.2.0] - 2026-10-12
 
 A review of the March release found several defects that produced wrong numbers silently. All of them

@@ -1,0 +1,25 @@
+[package]
+name = "thermal-calibration-app"
+description = "Thermal Calibration Tool desktop app (Tauri shell over thermal-core)"
+version = "0.3.0-dev"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[lib]
+name = "thermal_calibration_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+thermal-core = { path = "../../crates/thermal-core" }
+
+# Stand-alone: the Tauri shell needs WebKitGTK to build, the engine and CLI in ../../ do not.
+[workspace]

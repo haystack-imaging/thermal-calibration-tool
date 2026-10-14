@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: file dialogs and opening the output folder",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default", "opener:default"]
+}

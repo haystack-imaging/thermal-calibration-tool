@@ -239,6 +239,13 @@ Background on why uncooled thermal cameras need field calibration and how the em
 - Kelly, J. et al. (2019). *Challenges and Best Practices for Deriving Temperature Data from an Uncalibrated UAV Thermal Infrared Camera.* Remote Sensing.
 - Han, Y. et al. (2020). *Field-Based Calibration of Unmanned Aerial Vehicle Thermal Infrared Imagery with Temperature-Controlled References.* Sensors.
 
+## Rust rewrite (in progress)
+
+A port to Rust with a Tauri desktop shell lives in [`rust/`](rust/README.md). Its engine reproduces this
+tool's golden flight to better than 1e-5 and its command line (`thermal-calibration --project FILE`)
+writes the same outputs; the desktop app is being built. Until it is complete, the Python tool in this
+folder is the release.
+
 ## Reporting problems and contributing
 
 Please use the [issue tracker](https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, which is what makes a report actionable. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.

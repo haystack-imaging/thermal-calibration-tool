@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/thermal-core", "crates/thermal-cli"]
+# the Tauri shell is its own project: it needs WebKitGTK, the engine and the CLI do not
+exclude = ["app/src-tauri"]
+
+[workspace.package]
+version = "0.3.0-dev"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
