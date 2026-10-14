@@ -2,8 +2,8 @@
 // view, the fit panel, the timeline and the process view. Rendering is "replace the HTML of a
 // region from the state"; the canvas viewer keeps its own state (zoom, pan, pixels).
 
-import { invoke, listen, pickFolder, pickImages, pickProjectToOpen, pickProjectToSave } from "./bridge";
-import { renderFitPanel } from "./fitpanel";
+import { invoke, listen, pickFolder, pickImages, pickProjectToOpen, pickProjectToSave, pickReportToSave } from "./bridge";
+import { plotSvg, renderFitPanel } from "./fitpanel";
 import { renderTimeline } from "./timeline";
 import { decodePixels, type AddResult, type AppState, type BatchDone, type CalEvent, type ImagePayload, type Point, type Preflight, type Row } from "./types";
 import { Viewer, type VizMode } from "./viewer";
@@ -541,7 +541,33 @@ function renderFit() {
   const subtitle = ev ? `shot ${current + 1}/${n} · ${label} · ${complete} target${complete !== 1 ? "s" : ""}` : "";
   const others = (state?.events ?? []).filter((e, i) => i !== current && e.fit && !e.fit.single_point).map((e) => ({ label: `shot ${e.index + 1} · ${fmtTime(e.timestamp)}`, fit: e.fit! }));
   renderFitPanel($("#fit-panel"), ev, subtitle, others, unit(), "No calibration image selected");
-  document.querySelector("#btn-report")?.addEventListener("click", () => void alert("Fit report", "The HTML fit report is not ported yet; the Python tool writes it (Export fit report)."));
+  document.querySelector("#btn-report")?.addEventListener("click", () => void exportReport());
+  document.querySelector("#btn-plot")?.addEventListener("click", () => showDetailedPlot());
+}
+
+async function exportReport() {
+  const ev = currentEvent();
+  if (!ev?.fit) return;
+  const html = await call<string>("fit_report_html", { index: current });
+  if (!html) return;
+  const path = await pickReportToSave(ev.file_name.replace(/\.[^.]+$/, "") + "_fit_report.html");
+  if (!path) return;
+  const ok = await call<null>("write_text_file", { path, text: html });
+  if (ok !== null || !state) status(`Fit report written: ${path}`);
+}
+
+function showDetailedPlot() {
+  const ev = currentEvent();
+  if (!ev?.fit || ev.fit.single_point) return;
+  const others = (state?.events ?? []).filter((e, i) => i !== current && e.fit && !e.fit.single_point).map((e) => ({ label: `shot ${e.index + 1} · ${fmtTime(e.timestamp)}`, fit: e.fit! }));
+  const f = ev.fit;
+  const diag = f.rmse !== null
+    ? `R² = ${(f.r_squared ?? NaN).toFixed(4)}, RMSE = ${f.rmse.toFixed(3)} ${unit()}, s = ${(f.resid_std ?? NaN).toFixed(3)}, SE(m) = ${(f.se_slope ?? NaN).toFixed(4)}, SE(b) = ${(f.se_intercept ?? NaN).toFixed(3)}, leave-one-out = ${f.loo_rmse !== null ? f.loo_rmse.toFixed(3) : "n/a"}`
+    : "2 targets: R² = 1 by construction, no scatter estimate";
+  const modal = $("#modal");
+  modal.innerHTML = `<div class="dialog" style="max-width:820px"><h3>Fit for ${esc(ev.file_name)}</h3>${plotSvg(ev, others, unit(), 760, 420).replace('class="fit-plot"', 'style="width:760px;height:420px;background:#fbfbf9;border:1px solid #d9dcd6"')}<pre style="margin-top:8px">${esc(diag)}</pre><div class="btns"><button class="btn accent" id="modal-close">Close</button></div></div>`;
+  modal.hidden = false;
+  $("#modal-close").addEventListener("click", () => (modal.hidden = true));
 }
 
 function renderAll() {
@@ -625,9 +651,11 @@ $("#btn-open").addEventListener("click", async () => {
   const p = await pickProjectToOpen();
   if (!p) return;
   imageCache.clear();
-  const s = await call<AppState>("open_project", { path: p });
-  if (!s) return;
+  const r = await call<{ problems: string[]; state: AppState }>("open_project", { path: p });
+  if (!r) return;
+  const s = r.state;
   applyState(s);
+  if (r.problems.length) await alert("Project opened with problems", r.problems.join("\n"));
   preflight = null;
   rows = [];
   pending = [];
@@ -691,6 +719,14 @@ void listen("batch-done", (p) => {
 
 void (async () => {
   const s = await call<AppState>("get_state");
-  if (s) applyState(s);
-  else renderAll();
+  if (!s) {
+    renderAll();
+    return;
+  }
+  applyState(s);
+  if (s.events.length) {
+    // a project given on the command line: show it like an opened project
+    await selectShot(0);
+    showStep(2);
+  }
 })();

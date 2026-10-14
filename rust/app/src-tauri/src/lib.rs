@@ -404,7 +404,7 @@ fn add_calibration_images(paths: Vec<String>, state: Shared) -> Result<AddResult
             continue;
         }
         let ts = extract_timestamp(&path);
-        let when = ts.value.unwrap_or_else(|| chrono_now());
+        let when = ts.value.unwrap_or_else(chrono_now);
         let mut ev = CalibrationEvent::new(path.clone(), when, &ts.source, &ts.tz);
         while ev.targets.len() < n_targets {
             ev.add_target();
@@ -699,10 +699,10 @@ fn suggested_project_filename(state: Shared) -> String {
     project_filename(Some(&serde_json::json!({"title": inner.title})))
 }
 
-#[tauri::command]
-fn open_project(path: String, state: Shared) -> Result<StateDto, String> {
-    let mut inner = lock(&state);
-    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+/// Load a project file into the state (settings, survey, images re-read, targets measured, fits
+/// recomputed). Returns the problems found, e.g. missing images; the rest of the project still loads.
+fn open_project_into(inner: &mut Inner, path: &str) -> Result<Vec<String>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let project: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let mode = Mode::parse(project.get("mode").and_then(|v| v.as_str()).unwrap_or("thermal"));
     let inset = project.get("roi_inset_px").and_then(|v| v.as_u64()).map_or(DEFAULT_ROI_INSET_PX, |v| v as u32);
@@ -713,14 +713,15 @@ fn open_project(path: String, state: Shared) -> Result<StateDto, String> {
         roi_inset_px: inset,
     };
     let sv = project.get("survey").cloned().unwrap_or_default();
+    let field = |k: &str| sv.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     inner.survey = SurveySettings {
-        folder: sv.get("folder").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        output_folder: sv.get("output_folder").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        filter: sv.get("filter").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        folder: field("folder"),
+        output_folder: field("output_folder"),
+        filter: field("filter"),
         copy_metadata: sv.get("copy_metadata").and_then(|v| v.as_bool()).unwrap_or(true),
         skip_existing: sv.get("skip_existing").and_then(|v| v.as_bool()).unwrap_or(false),
     };
-    let dir = std::path::absolute(&path).ok().and_then(|p| p.parent().map(Path::to_path_buf));
+    let dir = std::path::absolute(path).ok().and_then(|p| p.parent().map(Path::to_path_buf));
     let (events, problems) = events_from_project(&project, dir.as_deref(), inset);
     inner.events = events;
     inner.cache.clear();
@@ -732,17 +733,25 @@ fn open_project(path: String, state: Shared) -> Result<StateDto, String> {
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| thermal_core::file_name(Path::new(&path)).replace(".calib.json", "").replace(".json", ""));
-    inner.project_path = Some(PathBuf::from(&path));
+        .unwrap_or_else(|| thermal_core::file_name(Path::new(path)).replace(".calib.json", "").replace(".json", ""));
+    inner.project_path = Some(PathBuf::from(path));
     if !inner.survey.folder.is_empty() {
         inner.scan_survey_timestamps();
     }
-    if !problems.is_empty() {
-        let mut dto = state_dto(&mut inner);
-        dto.title = inner.title.clone();
-        return Err(problems.join("\n"));
-    }
-    Ok(state_dto(&mut inner))
+    Ok(problems)
+}
+
+#[derive(Serialize)]
+pub struct OpenResult {
+    pub problems: Vec<String>,
+    pub state: StateDto,
+}
+
+#[tauri::command]
+fn open_project(path: String, state: Shared) -> Result<OpenResult, String> {
+    let mut inner = lock(&state);
+    let problems = open_project_into(&mut inner, &path)?;
+    Ok(OpenResult { problems, state: state_dto(&mut inner) })
 }
 
 #[tauri::command]
@@ -751,6 +760,32 @@ fn new_project(state: Shared) -> StateDto {
     let cancel = inner.cancel.clone();
     *inner = Inner { cancel, ..Default::default() };
     state_dto(&mut inner)
+}
+
+/// The HTML fit report of one calibration shot (the front-end asks where to save it).
+#[tauri::command]
+fn fit_report_html(index: usize, state: Shared) -> Result<String, String> {
+    let inner = lock(&state);
+    let ev = inner.events.get(index).ok_or("no such image")?;
+    let em = &inner.settings.emissivity;
+    let mut settings = vec![
+        ("project".to_string(), inner.title.clone()),
+        ("mode".to_string(), if inner.settings.mode.is_thermal() { "thermal" } else { "multispectral" }.to_string()),
+        ("ROI edge inset (px)".to_string(), inner.settings.roi_inset_px.to_string()),
+        ("emissivity correction".to_string(), if em.enabled { "on" } else { "off" }.to_string()),
+    ];
+    if em.enabled {
+        settings.push(("panel ε".to_string(), em.target_emissivity.to_string()));
+        settings.push(("scene ε".to_string(), em.scene_emissivity.to_string()));
+        settings.push(("T_sky (°C)".to_string(), em.sky_temperature.to_string()));
+    }
+    let unit = if inner.settings.mode.is_thermal() { "°C" } else { "ρ" };
+    thermal_core::report::fit_report_html(ev, unit, &inner.events, &settings).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_text_file(path: String, text: String) -> Result<(), String> {
+    std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -765,10 +800,31 @@ fn open_in_file_manager(path: String) -> Result<(), String> {
 }
 
 pub fn run() {
+    // `thermal-calibration-app --project flight.calib.json` opens that project at start;
+    // `--screenshot out.png [--screenshot-delay SECONDS]` writes a snapshot of the window and exits
+    let args: Vec<String> = std::env::args().collect();
+    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned());
+    let project_arg = arg("--project");
+    let screenshot_arg = arg("--screenshot");
+    let screenshot_delay: u64 = arg("--screenshot-delay").and_then(|v| v.parse().ok()).unwrap_or(4);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState(Mutex::new(Inner::default())))
+        .setup(move |app| {
+            if let Some(p) = project_arg {
+                let st = app.state::<AppState>();
+                let mut inner = lock(&st);
+                match open_project_into(&mut inner, &p) {
+                    Ok(problems) => problems.iter().for_each(|w| eprintln!("WARNING: {w}")),
+                    Err(e) => eprintln!("could not open {p}: {e}"),
+                }
+            }
+            if let Some(path) = screenshot_arg {
+                schedule_screenshot(app.handle().clone(), path, screenshot_delay);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_state,
             add_calibration_images,
@@ -792,7 +848,146 @@ pub fn run() {
             open_project,
             new_project,
             open_in_file_manager,
+            fit_report_html,
+            write_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the application");
+}
+
+#[cfg(test)]
+mod tests {
+    //! The state logic without a window, on the golden flight (skipped when it is not built).
+    use super::*;
+
+    fn golden() -> Option<PathBuf> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let p = root.join("tests/data/golden_flight/flight.calib.json");
+        p.exists().then(|| p.canonicalize().expect("canonical"))
+    }
+
+    #[test]
+    fn open_measure_fit_preflight_and_run() {
+        let Some(project) = golden() else {
+            eprintln!("SKIPPED: python3 rust/tools/make_golden_flight.py first");
+            return;
+        };
+        let mut inner = Inner::default();
+        let problems = open_project_into(&mut inner, &project.to_string_lossy()).unwrap();
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(inner.events.len(), 3);
+        assert!(inner.events.iter().all(|e| e.fit.is_some()));
+        assert_eq!(inner.title, "golden flight");
+        let dto = state_dto(&mut inner);
+        assert_eq!(dto.events[0].targets.len(), 3);
+        assert!(dto.events[0].targets.iter().all(|t| t.complete && !t.inner.is_empty()));
+        assert!(dto.survey_timeline.len() == 6, "the project's survey folder was scanned");
+        // redraw one target smaller, reading unchanged: the fit follows
+        let before = inner.events[0].fit.as_ref().unwrap().slope;
+        inner.events[0].targets[0].polygon = order_corners(&[(44, 44), (76, 44), (76, 76), (44, 76)]);
+        inner.remeasure(0).unwrap();
+        inner.refit(0);
+        let after = inner.events[0].fit.as_ref().unwrap().slope;
+        assert!((before - after).abs() < 0.05 && before != after);
+        // a changed inset re-measures everything
+        inner.settings.roi_inset_px = 5;
+        inner.remeasure_all().unwrap();
+        assert!(inner.events.iter().all(|e| e.targets.iter().all(|t| t.pixel_count < 36 * 36)));
+        // the run, into a scratch folder
+        let out = std::env::temp_dir().join(format!("thermal_app_test_{}", std::process::id()));
+        inner.survey.output_folder = out.to_string_lossy().to_string();
+        let pf = preflight_dto(&mut inner);
+        assert!(!pf.blocking, "{:?}", pf.lines);
+        assert_eq!(pf.files.len(), 6);
+        let mut job = inner.job();
+        assert!(job.project.is_some());
+        job.survey_files = inner.job().survey_files;
+        let (mut log, mut progress, cancelled) = (|_: &str| {}, |_: usize, _: usize, _: &str| {}, || false);
+        let mut rows = Vec::new();
+        let mut on_row = |r: &Row| rows.push(row_json(r));
+        let mut cb = Callbacks { log: &mut log, progress: &mut progress, is_cancelled: &cancelled, on_row: Some(&mut on_row) };
+        let res = run_batch(&job, &mut cb, Some(&inner.survey_timestamps)).unwrap();
+        assert_eq!((res.ok, res.errors), (6, 0));
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[0]["status"], "ok");
+        assert!(rows[0]["slope_m"].is_number() && rows[0]["u_fit_1sigma"].is_number());
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn add_images_rejects_duplicates_and_previews() {
+        let Some(project) = golden() else { return };
+        let dir = project.parent().unwrap().join("calibration");
+        let mut inner = Inner::default();
+        let first = dir.join("cal_0.tif");
+        let ts = extract_timestamp(&first);
+        inner.events.push(CalibrationEvent::new(first.clone(), ts.value.unwrap(), &ts.source, &ts.tz));
+        assert_eq!(inner.events[0].targets.len(), 2, "two default targets");
+        let st = inner.raster(&first).unwrap();
+        assert_eq!((st.width, st.height), (320, 256));
+        assert!(inner.cache.contains_key(&first));
+        let json = inner.project_json(Some(dir.parent().unwrap()));
+        assert_eq!(json["calibration_images"][0]["path_relative"], "calibration/cal_0.tif");
+    }
+}
+
+/// After `delay` seconds, snapshot the main web view into a PNG and exit (Linux: WebKitGTK).
+#[cfg(target_os = "linux")]
+fn schedule_screenshot(handle: AppHandle, path: String, delay: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(delay));
+        eprintln!("screenshot: requesting the snapshot");
+        let on_main = handle.clone();
+        let _ = handle.run_on_main_thread(move || {
+            eprintln!("screenshot: on the main thread");
+            let Some(window) = on_main.get_webview_window("main") else {
+                eprintln!("screenshot: no main window");
+                on_main.exit(2);
+                return;
+            };
+            let after = on_main.clone();
+            let _ = window.with_webview(move |platform| {
+                use webkit2gtk::WebViewExt;
+                let view = platform.inner();
+                eprintln!("screenshot: web view at hand, uri={:?}, loading={}", view.uri(), view.is_loading());
+                view.snapshot(
+                    webkit2gtk::SnapshotRegion::Visible,
+                    webkit2gtk::SnapshotOptions::NONE,
+                    None::<&gio::Cancellable>,
+                    move |result| {
+                        let code = match result.map(cairo::ImageSurface::try_from) {
+                            Ok(Ok(image)) => match std::fs::File::create(&path).and_then(|mut f| image.write_to_png(&mut f).map_err(std::io::Error::other)) {
+                                Ok(()) => {
+                                    eprintln!("screenshot written: {path}");
+                                    0
+                                }
+                                Err(e) => {
+                                    eprintln!("screenshot: could not write {path}: {e}");
+                                    1
+                                }
+                            },
+                            Ok(Err(_)) => {
+                                eprintln!("screenshot: the snapshot is not an image surface");
+                                1
+                            }
+                            Err(e) => {
+                                eprintln!("screenshot failed: {e}");
+                                1
+                            }
+                        };
+                        after.exit(code);
+                    },
+                );
+            });
+        });
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn schedule_screenshot(handle: AppHandle, _path: String, delay: u64) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(delay));
+        eprintln!("--screenshot is only implemented on Linux");
+        handle.exit(2);
+    });
 }

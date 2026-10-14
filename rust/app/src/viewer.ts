@@ -35,6 +35,52 @@ function inferno(t: number): [number, number, number] {
 
 const INFERNO: [number, number, number][] = Array.from({ length: 256 }, (_, i) => inferno(i / 255));
 
+/** Contrast-limited adaptive histogram equalisation of 8-bit grey values, as OpenCV's CLAHE
+ *  (8×8 tiles, clip limit 2.0, bilinear interpolation between the tile mappings). */
+export function clahe(g: Uint8Array, w: number, h: number, valid: Uint8Array, tiles = 8, clip = 2.0): Uint8Array {
+  const tw = Math.ceil(w / tiles), th = Math.ceil(h / tiles);
+  const luts: Uint8Array[] = [];
+  for (let ty = 0; ty < tiles; ty++)
+    for (let tx = 0; tx < tiles; tx++) {
+      const hist = new Uint32Array(256);
+      let n = 0;
+      for (let y = ty * th; y < Math.min(h, (ty + 1) * th); y++)
+        for (let x = tx * tw; x < Math.min(w, (tx + 1) * tw); x++) {
+          const i = y * w + x;
+          if (valid[i]) { hist[g[i]]++; n++; }
+        }
+      const lut = new Uint8Array(256);
+      if (n > 0) {
+        const limit = Math.max(1, Math.floor((clip * n) / 256));
+        let excess = 0;
+        for (let i = 0; i < 256; i++) if (hist[i] > limit) { excess += hist[i] - limit; hist[i] = limit; }
+        const share = Math.floor(excess / 256), rest = excess - share * 256;
+        for (let i = 0; i < 256; i++) hist[i] += share + (i < rest ? 1 : 0);
+        let cdf = 0;
+        for (let i = 0; i < 256; i++) { cdf += hist[i]; lut[i] = Math.round((cdf * 255) / n); }
+      } else for (let i = 0; i < 256; i++) lut[i] = i;
+      luts.push(lut);
+    }
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const fy = (y + 0.5) / th - 0.5;
+    const y0 = Math.max(0, Math.min(tiles - 1, Math.floor(fy))), y1 = Math.min(tiles - 1, y0 + 1);
+    const wy = Math.min(1, Math.max(0, fy - y0));
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!valid[i]) continue;
+      const fx = (x + 0.5) / tw - 0.5;
+      const x0 = Math.max(0, Math.min(tiles - 1, Math.floor(fx))), x1 = Math.min(tiles - 1, x0 + 1);
+      const wx = Math.min(1, Math.max(0, fx - x0));
+      const v = g[i];
+      const top = luts[y0 * tiles + x0][v] * (1 - wx) + luts[y0 * tiles + x1][v] * wx;
+      const bot = luts[y1 * tiles + x0][v] * (1 - wx) + luts[y1 * tiles + x1][v] * wx;
+      out[i] = Math.round(top * (1 - wy) + bot * wy);
+    }
+  }
+  return out;
+}
+
 export class Viewer {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -111,26 +157,25 @@ export class Viewer {
     if (!img) return;
     this.off.width = img.width;
     this.off.height = img.height;
-    let lo = img.lo, hi = img.hi;
-    if (this.mode === "clahe") {
-      const v = Array.from(img.data).filter((x) => isFinite(x)).sort((a, b) => a - b);
-      if (v.length) {
-        lo = v[Math.round((v.length - 1) * 0.01)];
-        hi = v[Math.round((v.length - 1) * 0.99)];
-      }
-    }
+    const lo = img.lo, hi = img.hi;
     this.stretch = [lo, hi];
     const span = hi > lo ? hi - lo : 1;
+    const n = img.data.length;
+    const grey = new Uint8Array(n), valid = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = img.data[i];
+      if (isFinite(v)) { valid[i] = 1; grey[i] = Math.round(Math.min(1, Math.max(0, (v - lo) / span)) * 255); }
+    }
+    const levels = this.mode === "clahe" ? clahe(grey, img.width, img.height, valid) : grey;
     const out = this.offCtx.createImageData(img.width, img.height);
     const d = out.data;
-    for (let i = 0, j = 0; i < img.data.length; i++, j += 4) {
-      const v = img.data[i];
-      if (!isFinite(v)) {
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      if (!valid[i]) {
         d[j] = d[j + 1] = d[j + 2] = 0;
         d[j + 3] = 255;
         continue;
       }
-      const g = Math.round(Math.min(1, Math.max(0, (v - lo) / span)) * 255);
+      const g = levels[i];
       if (this.mode === "inferno") {
         const c = INFERNO[g];
         d[j] = c[0]; d[j + 1] = c[1]; d[j + 2] = c[2];

@@ -22,6 +22,7 @@ pub mod model;
 pub mod physics;
 pub mod project;
 pub mod raster;
+pub mod report;
 pub mod roi;
 pub mod timestamp;
 

@@ -100,6 +100,6 @@ export function renderFitPanel(el: HTMLElement, ev: CalEvent | null, subtitle: s
   parts.push(`<div class="tiles">${tiles.map(([c, v]) => `<div class="tile"><div class="c">${esc(c)}</div><div class="v">${esc(v)}</div></div>`).join("")}</div>`);
   const warnings = ev?.fit_warnings ?? [];
   if (warnings.length) parts.push(`<div class="warnbox">${warnings.map((w) => "⚠ " + esc(w)).join("<br><br>")}</div>`);
-  parts.push(`<div class="fit-btns"><button class="btn" id="btn-report" ${fit ? "" : "disabled"}>Export fit report</button></div>`);
+  parts.push(`<div class="fit-btns"><button class="btn" id="btn-plot" ${fit && !fit.single_point ? "" : "disabled"}>Detailed plot</button><button class="btn accent" id="btn-report" ${fit ? "" : "disabled"}>Export fit report</button></div>`);
   el.innerHTML = parts.join("");
 }

@@ -19,7 +19,15 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+chrono = "0.4"
+
 thermal-core = { path = "../../crates/thermal-core" }
+
+# the same versions wry uses, for the --screenshot option (a snapshot of the web view, Linux only)
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+cairo-rs = { version = "0.18", features = ["png"] }
+gio = "0.18"
 
 # Stand-alone: the Tauri shell needs WebKitGTK to build, the engine and CLI in ../../ do not.
 [workspace]
