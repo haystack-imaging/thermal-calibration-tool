@@ -37,7 +37,7 @@ fn ensure_dev_server() -> Option<std::process::Child> {
         "run `npm install` in rust/app first ({} missing)",
         vite.display()
     );
-    let child = Command::new("node")
+    let mut child = Command::new("node")
         .arg(vite)
         .args(["--host", "127.0.0.1", "--port", "5173", "--strictPort"])
         .current_dir(&app_dir)
@@ -51,6 +51,8 @@ fn ensure_dev_server() -> Option<std::process::Child> {
         }
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("the Vite dev server did not come up on 127.0.0.1:5173");
 }
 
