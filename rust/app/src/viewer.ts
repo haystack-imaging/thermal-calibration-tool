@@ -198,6 +198,10 @@ export class Viewer {
       this.redraw();
       return;
     }
+    if (!W || !H) {
+      this.fitted = true; // the canvas is hidden: the ResizeObserver fits the image once it has a size
+      return;
+    }
     this.scale = Math.max(0.05, Math.min(W / this.image.width, H / this.image.height));
     this.ox = (this.image.width - W / this.scale) / 2;
     this.oy = (this.image.height - H / this.scale) / 2;

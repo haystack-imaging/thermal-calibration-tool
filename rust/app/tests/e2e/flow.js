@@ -93,13 +93,29 @@ for (let i = 0; i < 3; i++) {
   await e2e.until(() => app().current() === i && app().viewer.image);
   const shot = env.shots[i];
   for (let j = 0; j < 3; j++) {
-    await drawPolygon(j, shot.polygons[j], j === 1 ? "first" : "enter");
+    if (i === 1 && j === 1) {
+      // T1's reading left T2's drawing active; cancel it and start it again with a click on the image
+      keyWindow("Escape");
+      await e2e.until(() => !app().drawing());
+      const c = shot.polygons[1];
+      clickImage(c[0][0], c[0][1]);
+      await e2e.until(() => app().drawing() && app().viewer.activeTarget === 1 && app().viewer.drawing.length === 1);
+      await e2e.report("a click on the image starts the next target with that corner", true);
+      for (const [x, y] of c.slice(1)) clickImage(x, y);
+      keyWindow("Enter");
+      await e2e.until(() => !app().drawing() && state().events[1].targets[1].polygon.length === 4);
+    } else await drawPolygon(j, shot.polygons[j], j === 1 ? "first" : "enter");
     const t = state().events[i].targets[j];
     await e2e.report(`shot ${i + 1}: polygon T${j + 1}`, t.polygon.length === 4 && t.pixels > 1000 && t.inner.length === 1, { mean: t.mean, pixels: t.pixels });
-    if (j === 0) await e2e.report(`shot ${i + 1}: reading field focused after the 4th corner`, document.activeElement === document.querySelector(`[data-gt="${j}"]`));
+    if (j === 0) await e2e.report(`shot ${i + 1}: reading field focused after the polygon closed`, document.activeElement === document.querySelector(`[data-gt="${j}"]`));
     e2e.type(`[data-gt="${j}"]`, String(shot.gun[j]).replace(".", ","));
     await e2e.until(() => state().events[i].targets[j].ground_truth !== null);
+    if (j < 2) {
+      await e2e.until(() => app().drawing() && app().viewer.activeTarget === j + 1);
+      if (i === 0 && j === 0) await e2e.report("the committed reading moves on to drawing the next target", true);
+    }
   }
+  await e2e.report(`shot ${i + 1}: nothing to draw after the last reading`, !app().drawing());
   await e2e.until(() => state().events[i].fit);
   const fit = state().events[i].fit;
   const exp = env.expected[i];
@@ -203,6 +219,14 @@ await e2e.wait(300);
 if (!document.querySelector("#modal").hidden) e2e.click("#modal button.accent");
 await e2e.until(() => state().last_output, 60000);
 await e2e.report("batch done", app().rows().length === 6 && app().rows().every((r) => r.status === "ok") && /Done: 6 ok/.test(e2e.$("#process-view").textContent), app().rows().map((r) => r.input_filename + " " + r.slope_m));
+{
+  const table = e2e.$("#process-view .results-table");
+  const first = app().rows()[0];
+  window.__app.updateRow({ ...first, slope_m: 9.9999 });
+  const same = e2e.$("#process-view .results-table") === table;
+  await e2e.report("a finished image updates its row in place, the table does not jump", same && /9\.9999/.test(e2e.$(`#process-view tr[data-file="${first.input_filename}"]`).textContent));
+  window.__app.updateRow(first);
+}
 await e2e.report("done guidance offers to inspect the results", /Done\./.test(app().guidance().process.head) && /Inspect the results/.test(app().guidance().process.action.label));
 
 // ---------------------------------------------------------------- hover readout and the Inspect section
@@ -234,6 +258,13 @@ await e2e.report("the table is saved as CSV", true);
 e2e.click("#btn-inspect-next");
 await e2e.until(() => e2e.$("#image-name").textContent === app().inspect().images[1].name && app().viewer.image);
 await e2e.report("polygons belong to their image", app().inspectPolys().length === 0);
+e2e.click("#btn-inspect-clear");
+await e2e.until(() => app().inspect().images.length === 0 && !app().viewer.image);
+e2e.click("#btn-inspect-back");
+await e2e.until(() => !app().inspecting());
+e2e.click('[data-step="inspect"] .step-header');
+await e2e.until(() => app().inspecting() && app().inspect().images.length === 6 && app().viewer.image);
+await e2e.report("Inspect opens the last run's outputs by itself", true);
 e2e.click("#btn-inspect-back");
 await e2e.until(() => !app().inspecting() && app().activeStep() === 3 && !document.querySelector("#process-view").hidden);
 await e2e.report("back to the calibration", true);

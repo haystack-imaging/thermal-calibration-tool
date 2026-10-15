@@ -15,7 +15,8 @@ Once the page has loaded, the script runs with two objects:
   native file dialogs. Uncaught errors, unhandled rejections and `console.error` calls are recorded and
   fail the run.
 - `window.__app` (from `src/main.ts`): read access to the state, the selected shot, the active step, the
-  pre-flight result and the result rows, the viewer, and `selectShot`, `showStep`, `guidance()`.
+  pre-flight result and the result rows, the viewer, the Inspect state, and `selectShot`, `showStep`,
+  `guidance()`, `toggleInspect()`, `rerender()`, `updateRow(row)` (the in-place update of a result row).
 
 The report is JSON: `{ok, steps, failed, errors, entries: [...]}`; the exit code is 0 only when every step
 passed and nothing was logged as an error.

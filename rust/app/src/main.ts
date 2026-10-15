@@ -341,15 +341,9 @@ function wireRail() {
   on(".alias", "dblclick", (el) => { renaming = Number(el.closest<HTMLElement>(".trow")!.dataset.t); renderRail(); $<HTMLInputElement>("#rename-input")?.focus(); });
   on("#rename-input", "keydown", (el, e) => { const k = (e as KeyboardEvent).key; if (k === "Enter") { void finishRename((el as HTMLInputElement).value); } else if (k === "Escape") { renaming = null; renderRail(); } });
   on("#rename-input", "blur", (el) => void finishRename((el as HTMLInputElement).value));
-  on("[data-gt]", "change", (el) => void setGroundTruth(Number(el.dataset.gt), (el as HTMLInputElement).value));
+  on("[data-gt]", "change", (el) => void commitReading(Number(el.dataset.gt), (el as HTMLInputElement).value, false));
   on("[data-gt]", "keydown", (el, e) => {
-    if ((e as KeyboardEvent).key === "Enter") {
-      const i = Number(el.dataset.gt);
-      void setGroundTruth(i, (el as HTMLInputElement).value).then(() => {
-        const next = document.querySelector<HTMLInputElement>(`[data-gt="${i + 1}"]`);
-        if (next) { next.focus(); next.select(); } else (el as HTMLInputElement).blur();
-      });
-    }
+    if ((e as KeyboardEvent).key === "Enter") void commitReading(Number(el.dataset.gt), (el as HTMLInputElement).value, true);
   });
   on("#btn-add-target", "click", () => void addTargetAndDraw());
   on("#btn-inspect-open", "click", () => void inspectAdd("files"));
@@ -481,11 +475,49 @@ function finishDrawing() {
 }
 
 /** On entering step 2: the first target without a polygon is ready to draw, no click needed. */
-function maybeAutoDraw() {
+function nextUndrawnTarget(): number {
   const ev = currentEvent();
-  if (!ev || drawing) return;
-  const j = visibleTargets(ev).findIndex((t) => t.polygon.length < 3);
+  return ev ? visibleTargets(ev).findIndex((t) => t.polygon.length < 3) : -1;
+}
+
+function maybeAutoDraw() {
+  if (drawing || inspecting) return;
+  const j = nextUndrawnTarget();
   if (j >= 0) startDrawing(j);
+}
+
+/** A reading typed (Enter or leaving the field): commit it, then the next target without a polygon is
+ *  ready to draw. When every target of the shot is drawn, Enter moves to the next reading field. */
+async function commitReading(i: number, text: string, viaEnter: boolean) {
+  await setGroundTruth(i, text);
+  const ev = currentEvent();
+  if (!ev || drawing || inspecting) return;
+  const t = ev.targets[i];
+  if (!t || t.ground_truth === null) return;
+  const next = nextUndrawnTarget();
+  if (next >= 0) {
+    startDrawing(next);
+    return;
+  }
+  if (viaEnter) {
+    const field = document.querySelector<HTMLInputElement>(`[data-gt="${i + 1}"]`);
+    if (field) {
+      field.focus();
+      field.select();
+    } else (document.activeElement as HTMLElement | null)?.blur();
+  }
+}
+
+/** A click on the image while nothing is being drawn starts the next polygon with that corner. */
+function drawingForClick(): typeof drawing {
+  if (drawing) return drawing;
+  if (inspecting) {
+    if (inspect.images.length) startInspectDrawing();
+  } else {
+    const next = nextUndrawnTarget();
+    if (next >= 0) startDrawing(next);
+  }
+  return drawing;
 }
 
 async function addTargetAndDraw() {
@@ -505,6 +537,16 @@ async function toggleInspect() {
   cancelDrawing(true);
   inspecting = true;
   settingsOpen = false;
+  if (!inspect.images.length && state?.last_output) {
+    // A run has been done: start with its outputs. The Inspect layout goes first, so the viewer has
+    // its size when the first image arrives.
+    viewer.placeholder = "Opening the outputs of the last run…";
+    viewer.setImage(null);
+    renderAll();
+    await inspectAddPaths([state.last_output]);
+    if (!inspect.images.length) await inspectSelect(0);
+    return;
+  }
   await inspectSelect(inspectCurrent);
 }
 
@@ -548,8 +590,9 @@ async function inspectAdd(kind: "files" | "folder") {
 /** From the Process step's "Done" card: the output folder, opened in Inspect. */
 async function inspectResults() {
   if (!state?.last_output) return;
-  if (!inspecting) await toggleInspect();
-  await inspectAddPaths([state.last_output]);
+  const hadImages = inspect.images.length > 0;
+  if (!inspecting) await toggleInspect(); // opens the outputs by itself when nothing else is open
+  if (hadImages || !inspect.images.length) await inspectAddPaths([state.last_output]);
 }
 
 async function inspectRemoveImage() {
@@ -768,37 +811,71 @@ function renderCenter() {
   if (process) renderProcess();
 }
 
+const RESULT_COLS: [string, string, boolean][] = [["input_filename", "Image", false], ["timestamp", "Time · source", false], ["slope_m", "m", true], ["intercept_b", "b", true], ["original_mean_celsius", "mean in", true], ["calibrated_mean_celsius", "mean out", true], ["u_fit_1sigma", "± 1σ", true], ["status", "Status", false]];
+
+function resultRowHtml(r: Row): string {
+  const st = String(r.status ?? "");
+  const pos = String(r.position_vs_calibration ?? "");
+  const shown = st !== "ok" ? st : pos === "before" || pos === "after" ? pos : "ok";
+  const cls = st.startsWith("error") ? "err" : shown === "before" || shown === "after" || st.startsWith("skipped") ? "warn" : "";
+  const cell = (k: string, num: boolean) => {
+    const v = r[k];
+    if (k === "timestamp") return `${String(v ?? "").slice(11, 19)} · ${esc(String(r.timestamp_source ?? ""))}`;
+    if (k === "status") return esc(shown);
+    if (v === null || v === undefined) return "";
+    if (typeof v === "number") return k === "slope_m" ? v.toFixed(4) : v.toFixed(k === "intercept_b" ? 3 : 2);
+    return num ? String(v) : esc(String(v));
+  };
+  return `<tr class="${cls}" data-file="${esc(String(r.input_filename ?? ""))}">${RESULT_COLS.map(([k, , num]) => `<td class="${num ? "r" : ""}">${cell(k, num)}</td>`).join("")}</tr>`;
+}
+
+function pendingRowHtml(f: string): string {
+  return `<tr class="pending" data-file="${esc(f)}"><td>${esc(f)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td>not processed</td></tr>`;
+}
+
+function progressHtml(): string {
+  return `<div class="muted small">${esc(progressText)}</div><div class="bar"><div style="width:${progressPct}%"></div></div>`;
+}
+
+/** During a run the progress and the finished rows change in place, so the table can be scrolled
+ *  while it fills; a full re-render keeps the table's scroll position. */
 function renderProcess() {
   const el = $("#process-view");
+  const scrollTop = el.querySelector(".results-table")?.scrollTop ?? 0;
   const lines = preflight?.lines ?? [];
   const counts = preflight ? `${lines.filter((l) => l[0] === "ok").length} passed · ${lines.filter((l) => l[0] === "warn").length} warnings · ${lines.filter((l) => l[0] === "block").length} blocking` : "waiting for the survey folder";
   const sym: Record<string, string> = { ok: "✓", warn: "⚠", block: "✗" };
-  const cols: [string, string, boolean][] = [["input_filename", "Image", false], ["timestamp", "Time · source", false], ["slope_m", "m", true], ["intercept_b", "b", true], ["original_mean_celsius", "mean in", true], ["calibrated_mean_celsius", "mean out", true], ["u_fit_1sigma", "± 1σ", true], ["status", "Status", false]];
-  const rowHtml = (r: Row) => {
-    const st = String(r.status ?? "");
-    const pos = String(r.position_vs_calibration ?? "");
-    const shown = st !== "ok" ? st : pos === "before" || pos === "after" ? pos : "ok";
-    const cls = st.startsWith("error") ? "err" : shown === "before" || shown === "after" || st.startsWith("skipped") ? "warn" : "";
-    const cell = (k: string, num: boolean) => {
-      const v = r[k];
-      if (k === "timestamp") return `${String(v ?? "").slice(11, 19)} · ${String(r.timestamp_source ?? "")}`;
-      if (k === "status") return shown;
-      if (v === null || v === undefined) return "";
-      if (typeof v === "number") return k === "slope_m" ? v.toFixed(4) : v.toFixed(k === "intercept_b" ? 3 : 2);
-      return num ? String(v) : esc(String(v));
-    };
-    return `<tr class="${cls}">${cols.map(([k, , num]) => `<td class="${num ? "r" : ""}">${cell(k, num)}</td>`).join("")}</tr>`;
-  };
   const done = new Set(rows.map((r) => String(r.input_filename)));
-  const pendingHtml = pending.filter((f) => !done.has(f)).map((f) => `<tr class="pending"><td>${esc(f)}</td><td></td><td></td><td></td><td></td><td></td><td></td><td>not processed</td></tr>`).join("");
+  const pendingHtml = pending.filter((f) => !done.has(f)).map(pendingRowHtml).join("");
   const hint = !state?.survey.folder ? "Nothing to process yet.\n\nChoose the survey folder on the left (Browse): every image in it is listed here, checked, and calibrated when you press Run." : !pending.length && !rows.length ? "No images found in this folder (calibration shots and earlier outputs are excluded).\nChoose another survey folder or clear the filename filter." : "";
   el.innerHTML = `<div class="card pf"><div class="pf-head"><span>Pre-flight check</span><span class="muted small" style="font-weight:normal">${esc(counts)}</span></div>${lines.map(([l, t]) => `<div class="pf-line ${l}">${sym[l] ?? "-"} ${esc(t)}</div>`).join("")}</div>
-<div class="card runbar"><button class="btn" id="btn-check">Check</button><button class="btn accent" id="btn-run" ${state?.running ? "disabled" : ""}>Run</button><button class="btn" id="btn-cancel" ${state?.running ? "" : "disabled"}>Cancel</button><div class="progress"><div class="muted small">${esc(progressText)}</div><div class="bar"><div style="width:${progressPct}%"></div></div></div></div>
-<div class="card results"><div class="results-head"><span>Results</span><span class="muted small" style="font-weight:normal">one row per image; grey rows are not processed yet</span><span class="spacer"></span><button class="btn small" id="btn-open-output" ${state?.last_output ? "" : "disabled"}>Open output folder</button></div><div class="results-table"><table class="res"><thead><tr>${cols.map(([, t, num]) => `<th class="${num ? "r" : ""}">${t}</th>`).join("")}</tr></thead><tbody>${rows.map(rowHtml).join("")}${pendingHtml}</tbody></table></div>${hint ? `<div class="placeholder">${esc(hint).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
+<div class="card runbar"><button class="btn" id="btn-check">Check</button><button class="btn accent" id="btn-run" ${state?.running ? "disabled" : ""}>Run</button><button class="btn" id="btn-cancel" ${state?.running ? "" : "disabled"}>Cancel</button><div class="progress">${progressHtml()}</div></div>
+<div class="card results"><div class="results-head"><span>Results</span><span class="muted small" style="font-weight:normal">one row per image; grey rows are not processed yet</span><span class="spacer"></span><button class="btn small" id="btn-open-output" ${state?.last_output ? "" : "disabled"}>Open output folder</button></div><div class="results-table"><table class="res"><thead><tr>${RESULT_COLS.map(([, t, num]) => `<th class="${num ? "r" : ""}">${t}</th>`).join("")}</tr></thead><tbody>${rows.map(resultRowHtml).join("")}${pendingHtml}</tbody></table></div>${hint ? `<div class="placeholder">${esc(hint).replace(/\n/g, "<br>")}</div>` : ""}</div>`;
+  const table = el.querySelector(".results-table");
+  if (table) table.scrollTop = scrollTop;
   $("#btn-check").addEventListener("click", () => void runPreflight());
   $("#btn-run").addEventListener("click", () => void startBatch());
   $("#btn-cancel").addEventListener("click", () => void call("cancel_batch"));
   $("#btn-open-output").addEventListener("click", () => void call("open_in_file_manager", { path: state?.last_output }));
+}
+
+function updateProgressInPlace() {
+  const box = document.querySelector("#process-view .progress");
+  if (!box || $("#process-view").hidden) {
+    if (activeStep === 3 && !inspecting) renderProcess();
+    return;
+  }
+  box.innerHTML = progressHtml();
+}
+
+function updateRowInPlace(r: Row) {
+  const name = String(r.input_filename ?? "");
+  const tr = document.querySelector(`#process-view tr[data-file="${CSS.escape(name)}"]`);
+  if (!tr || $("#process-view").hidden) {
+    if (activeStep === 3 && !inspecting) renderProcess();
+    return;
+  }
+  tr.outerHTML = resultRowHtml(r);
 }
 
 function renderFit() {
@@ -877,15 +954,16 @@ async function showStep(n: Step) {
 // ----------------------------------------------------------------------------- viewer wiring
 
 viewer.onClick = (x, y) => {
-  if (!drawing) return;
+  const d = drawingForClick();
+  if (!d) return;
   const hit = viewer.hitPoint(x, y);
-  if (hit === 0 && drawing.points.length >= 3) {
+  if (hit === 0 && d.points.length >= 3) {
     finishDrawing(); // the ringed first corner closes the polygon
     return;
   }
-  if (hit >= 0) drawing.points.splice(hit, 1); // a corner clicked again is removed
-  else drawing.points.push([x, y]);
-  viewer.drawing = drawing.points;
+  if (hit >= 0) d.points.splice(hit, 1); // a corner clicked again is removed
+  else d.points.push([x, y]);
+  viewer.drawing = d.points;
   renderAll();
 };
 viewer.onMotion = (x, y, v) => {
@@ -1052,11 +1130,11 @@ void listen("batch-progress", (p) => {
   const { done, total, name } = p as { done: number; total: number; name: string };
   progressPct = total ? (100 * done) / total : 0;
   progressText = name ? `Processing ${Math.min(done + 1, total)} of ${total} · ${name}` : `${done} of ${total}`;
-  if (activeStep === 3) renderProcess();
+  updateProgressInPlace();
 });
 void listen("batch-row", (p) => {
   rows.push(p as Row);
-  if (activeStep === 3) renderProcess();
+  updateRowInPlace(p as Row);
 });
 void listen("batch-log", (p) => {
   const line = String(p);
@@ -1090,6 +1168,8 @@ declare global {
       inspect: () => InspectDto;
       inspectPolys: () => { points: Point[]; stats: PolygonStats | null }[];
       toggleInspect: () => Promise<void>;
+      rerender: () => void;
+      updateRow: (r: Row) => void;
     };
   }
 }
@@ -1110,6 +1190,8 @@ window.__app = {
   inspect: () => inspect,
   inspectPolys: currentInspectPolys,
   toggleInspect,
+  rerender: renderAll,
+  updateRow: updateRowInPlace,
 };
 
 // ----------------------------------------------------------------------------- start
