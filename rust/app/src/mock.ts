@@ -28,6 +28,24 @@ let state = {
   cancel: false,
 };
 let counter = 0;
+type Snapshot = { path: string; targets: MockShot["targets"]; fit: Fit | null }[];
+const undoStack: Snapshot[] = [];
+const redoStack: Snapshot[] = [];
+const snap = (): Snapshot => state.shots.map((s) => ({ path: s.path, targets: structuredClone(s.targets), fit: s.fit }));
+function snapshot() {
+  undoStack.push(snap());
+  if (undoStack.length > 50) undoStack.shift();
+  redoStack.length = 0;
+}
+function restore(sn: Snapshot) {
+  for (const r of sn) {
+    const s = state.shots.find((x) => x.path === r.path);
+    if (s) {
+      s.targets = structuredClone(r.targets);
+      s.fit = r.fit;
+    }
+  }
+}
 
 function synthShot(minute: number): Float32Array {
   const a = 0.97 - (minute / 14) * 0.02;
@@ -147,7 +165,7 @@ function surveyTimeline() {
 }
 
 function stateDto(): AppState {
-  return { tool_name: "Thermal / MSI Calibration Tool", version: "0.3.0-mock", title: state.title, project_path: state.project_path, settings: state.settings, survey: state.survey, events: state.shots.map(eventDto), survey_timeline: surveyTimeline(), last_output: state.last_output, running: state.running };
+  return { tool_name: "Thermal / MSI Calibration Tool", version: "0.3.0-mock", title: state.title, project_path: state.project_path, settings: state.settings, survey: state.survey, events: state.shots.map(eventDto), survey_timeline: surveyTimeline(), last_output: state.last_output, running: state.running, can_undo: undoStack.length > 0, can_redo: redoStack.length > 0 };
 }
 
 function preflight(): Preflight {
@@ -223,21 +241,26 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
     }
     case "set_polygon": {
       const shot = state.shots[a.event as number];
+      snapshot();
       const poly = (a.polygon as Point[]).slice();
-      const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
-      poly.sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx));
+      if (poly.length === 4) {
+        const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length, cy = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+        poly.sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx));
+      }
       shot.targets[a.target as number].polygon = poly;
       refit(shot);
       return stateDto();
     }
     case "clear_polygon": {
       const shot = state.shots[a.event as number];
+      snapshot();
       shot.targets[a.target as number].polygon = [];
       refit(shot);
       return stateDto();
     }
     case "set_ground_truth": {
       const shot = state.shots[a.event as number];
+      if (shot.targets[a.target as number].ground_truth !== (a.value as number | null)) snapshot();
       shot.targets[a.target as number].ground_truth = (a.value as number | null);
       refit(shot);
       return stateDto();
@@ -245,10 +268,12 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
     case "add_target": {
       if (!state.shots.length) throw new Error("Load calibration images first.");
       const n = Math.max(...state.shots.map((s) => s.targets.length)) + 1;
+      snapshot();
       for (const s of state.shots) while (s.targets.length < n) s.targets.push({ name: `Target ${s.targets.length + 1}`, color: PALETTE[s.targets.length % PALETTE.length], polygon: [], ground_truth: null });
       return stateDto();
     }
     case "remove_target": {
+      snapshot();
       for (const s of state.shots) {
         if (s.targets.length <= 1) continue;
         s.targets.splice(a.index as number, 1);
@@ -259,6 +284,7 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
     }
     case "rename_target": {
       const name = (a.name as string).trim().slice(0, 16);
+      snapshot();
       for (const s of state.shots) if (s.targets[a.index as number]) s.targets[a.index as number].name = name || `Target ${(a.index as number) + 1}`;
       return stateDto();
     }
@@ -335,6 +361,22 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
       return stateDto();
     case "open_in_file_manager":
       return null;
+    case "undo": {
+      const sn = undoStack.pop();
+      if (sn) {
+        redoStack.push(snap());
+        restore(sn);
+      }
+      return stateDto();
+    }
+    case "redo": {
+      const sn = redoStack.pop();
+      if (sn) {
+        undoStack.push(snap());
+        restore(sn);
+      }
+      return stateDto();
+    }
     case "fit_report_html": {
       const shot = state.shots[a.index as number];
       return `<!doctype html><html><body><h1>Calibration fit report (mock)</h1><p>${shot.path}: m = ${shot.fit?.slope.toFixed(4)}</p></body></html>`;

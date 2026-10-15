@@ -168,3 +168,6 @@ table.res tr.err td { color: var(--block); }
 .dialog h3 { margin: 0 0 8px; font-size: 15px; }
 .dialog pre { white-space: pre-wrap; font: 12px/1.4 var(--font); margin: 0 0 12px; }
 .dialog .btns { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* help popups: the web view shows no native title tooltips, so hovering or clicking a ? opens this */
+#tip { position: fixed; z-index: 20; max-width: 320px; background: var(--text); color: #fff; font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25); white-space: pre-wrap; pointer-events: none; }

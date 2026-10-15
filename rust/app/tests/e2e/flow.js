@@ -38,28 +38,62 @@ await e2e.report("cancelled dialog does nothing", state().events.length === 3 &&
 // ---------------------------------------------------------------- 2 · Targets: draw on every shot
 e2e.click("#guide-1");
 await e2e.until(() => app().activeStep() === 2);
-await e2e.report("open step 2 from the card", /Draw T1 on shot 1 of 3/.test(app().guidance().targets.head));
+await e2e.report("drawing of T1 starts by itself on entering step 2", app().drawing() && app().viewer.activeTarget === 0 && /Click corner 1 of T1/.test(app().guidance().targets.head));
 e2e.click("#btn-add-target");
 await e2e.until(() => state().events[0].targets.length === 3);
 await e2e.report("third target on every shot", state().events.every((e) => e.targets.length === 3));
+await e2e.report("drawing of the new target starts by itself", app().drawing() && app().viewer.activeTarget === 2);
+e2e.click(".help");
+await e2e.until(() => !document.querySelector("#tip").hidden);
+await e2e.report("help icons open their text on click", e2e.$("#tip").textContent.length > 30);
+e2e.click(".help");
+await e2e.until(() => document.querySelector("#tip").hidden);
 
-const drawPolygon = async (target, corners) => {
-  e2e.click(`[data-draw="${target}"]`);
-  await e2e.until(() => app().drawing());
+const clickImage = (x, y) => {
   const canvas = e2e.$("#viewer");
   const r = canvas.getBoundingClientRect();
-  for (const [x, y] of corners) {
-    const [cx, cy] = app().viewer.toCanvas(x + 0.5, y + 0.5);
-    e2e.mouse(canvas, "mousedown", r.left + cx, r.top + cy);
-  }
-  await e2e.until(() => !app().drawing() && state().events[app().current()].targets[target].polygon.length === 4);
+  const [cx, cy] = app().viewer.toCanvas(x + 0.5, y + 0.5);
+  e2e.mouse(canvas, "mousedown", r.left + cx, r.top + cy);
 };
+const keyWindow = (key, mods = {}) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...mods }));
+const drawPolygon = async (target, corners, closeWith = "enter") => {
+  e2e.click(`[data-draw="${target}"]`);
+  await e2e.until(() => app().drawing() && app().viewer.activeTarget === target);
+  for (const [x, y] of corners) clickImage(x, y);
+  await e2e.until(() => app().viewer.drawing && app().viewer.drawing.length === corners.length);
+  if (closeWith === "first") clickImage(corners[0][0], corners[0][1]);
+  else keyWindow("Enter");
+  await e2e.until(() => !app().drawing() && state().events[app().current()].targets[target].polygon.length === corners.length);
+};
+
+// ---------------------------------------------------------------- corners can be removed; polygons can have any number of corners
+await app().selectShot(0);
+await e2e.until(() => app().current() === 0 && app().viewer.image);
+{
+  const c = env.shots[0].polygons[0];
+  e2e.click('[data-draw="0"]');
+  await e2e.until(() => app().drawing() && app().viewer.activeTarget === 0);
+  for (const [x, y] of c.slice(0, 3)) clickImage(x, y);
+  await e2e.until(() => app().viewer.drawing.length === 3);
+  clickImage(c[1][0], c[1][1]);
+  await e2e.until(() => app().viewer.drawing.length === 2);
+  await e2e.report("a corner clicked again is removed", /removed/.test(app().guidance().targets.detail));
+  keyWindow("z", { ctrlKey: true });
+  await e2e.until(() => app().viewer.drawing.length === 1);
+  await e2e.report("Ctrl+Z removes the last corner while drawing", true);
+  keyWindow("Escape");
+  await e2e.until(() => !app().drawing());
+  const five = [c[0], [Math.round((c[0][0] + c[1][0]) / 2), c[0][1] - 3], c[1], c[2], c[3]];
+  await drawPolygon(0, five, "first");
+  const t = state().events[0].targets[0];
+  await e2e.report("a five-corner polygon, closed by clicking the first corner", t.polygon.length === 5 && t.pixels > 1000 && t.inner.length === 1, { pixels: t.pixels, mean: t.mean });
+}
 for (let i = 0; i < 3; i++) {
   await app().selectShot(i);
   await e2e.until(() => app().current() === i && app().viewer.image);
   const shot = env.shots[i];
   for (let j = 0; j < 3; j++) {
-    await drawPolygon(j, shot.polygons[j]);
+    await drawPolygon(j, shot.polygons[j], j === 1 ? "first" : "enter");
     const t = state().events[i].targets[j];
     await e2e.report(`shot ${i + 1}: polygon T${j + 1}`, t.polygon.length === 4 && t.pixels > 1000 && t.inner.length === 1, { mean: t.mean, pixels: t.pixels });
     if (j === 0) await e2e.report(`shot ${i + 1}: reading field focused after the 4th corner`, document.activeElement === document.querySelector(`[data-gt="${j}"]`));
@@ -97,6 +131,12 @@ await e2e.until(() => state().events[0].targets.length === 4);
 e2e.click('[data-remove="3"]');
 await e2e.until(() => state().events[0].targets.length === 3);
 await e2e.report("remove an undrawn target", state().events.every((e) => e.targets.length === 3 && e.fit));
+keyWindow("z", { ctrlKey: true });
+await e2e.until(() => state().events[0].targets.length === 4);
+await e2e.report("Ctrl+Z brings a removed target back on every shot", state().events.every((e) => e.targets.length === 4) && state().can_redo);
+keyWindow("Z", { ctrlKey: true, shiftKey: true });
+await e2e.until(() => state().events[0].targets.length === 3);
+await e2e.report("Ctrl+Shift+Z redoes the removal", state().events.every((e) => e.targets.length === 3));
 e2e.click('[data-step="settings"] .step-header');
 await e2e.until(() => document.querySelector("#inset"));
 const pixelsBefore = state().events[0].targets[0].pixels;
@@ -107,6 +147,35 @@ e2e.type("#inset", "3");
 await e2e.until(() => state().events[0].targets[0].pixels === pixelsBefore);
 e2e.click('[data-step="2"] .step-header');
 await e2e.until(() => app().activeStep() === 2 && !document.querySelector("#inset"));
+
+// ---------------------------------------------------------------- leaving Targets with a shot that lacks a polygon is flagged; undo/redo
+await app().selectShot(1);
+await e2e.until(() => app().current() === 1 && app().viewer.image);
+keyWindow("Escape");
+e2e.click('[data-clear="2"]');
+await e2e.until(() => state().events[1].targets[2].polygon.length === 0);
+e2e.click('[data-step="3"] .step-header');
+await e2e.until(() => !document.querySelector("#modal").hidden);
+const warning = e2e.$("#modal").textContent;
+await e2e.report("leaving Targets with a missing polygon is flagged", /shot 2/.test(warning) && /T3 \(no polygon\)/.test(warning) && app().activeStep() !== 3, warning.slice(0, 160));
+e2e.click("#modal button:not(.accent)");
+await e2e.until(() => document.querySelector("#modal").hidden && app().activeStep() === 2);
+keyWindow("Escape");
+keyWindow("z", { ctrlKey: true });
+await e2e.until(() => state().events[1].targets[2].polygon.length === 4);
+await e2e.report("Ctrl+Z restores a cleared polygon with its fit", state().events[1].fit && state().events[1].fit.n === 3);
+keyWindow("y", { ctrlKey: true });
+await e2e.until(() => state().events[1].targets[2].polygon.length === 0);
+await e2e.report("Ctrl+Y redoes the clearing", state().events[1].fit && state().events[1].fit.n === 2);
+e2e.click("#btn-undo");
+await e2e.until(() => state().events[1].targets[2].polygon.length === 4);
+await e2e.report("the Undo button works as well", state().can_redo && state().events[1].fit.n === 3);
+const reading = state().events[1].targets[0].ground_truth;
+e2e.type('[data-gt="0"]', "99");
+await e2e.until(() => state().events[1].targets[0].ground_truth === 99);
+keyWindow("z", { ctrlKey: true });
+await e2e.until(() => state().events[1].targets[0].ground_truth === reading);
+await e2e.report("Ctrl+Z restores an overwritten reading", true, { reading });
 
 // ---------------------------------------------------------------- 3 · Process
 e2e.click("#guide-2");
@@ -120,6 +189,15 @@ await e2e.until(() => state().survey.output_folder === env.output);
 const pf = app().preflight();
 await e2e.report("pre-flight lists 6 images", !pf.blocking && pf.files.length === 6 && /6 images ready/.test(app().guidance().process.head), pf.lines);
 await e2e.report("timeline shows the survey", state().survey_timeline.length === 6 && e2e.$("#timeline").querySelectorAll("rect").length >= 6);
+{
+  const w0 = e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width;
+  e2e.$("#fit-panel").style.width = "600px";
+  await e2e.until(() => e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width !== w0);
+  const w1 = e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width;
+  await e2e.report("timeline redraws at the new width when the window changes size", Math.abs(w1 - (e2e.$("#timeline").clientWidth - 28)) < 2 && w1 < w0, { before: w0, after: w1 });
+  e2e.$("#fit-panel").style.width = "";
+  await e2e.until(() => e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width === w0);
+}
 e2e.click("#btn-run");
 await e2e.wait(300);
 if (!document.querySelector("#modal").hidden) e2e.click("#modal button.accent");

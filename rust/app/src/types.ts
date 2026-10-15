@@ -92,6 +92,8 @@ export interface AppState {
   survey_timeline: TimelinePoint[];
   last_output: string | null;
   running: boolean;
+  can_undo: boolean;
+  can_redo: boolean;
 }
 
 export interface AddResult {

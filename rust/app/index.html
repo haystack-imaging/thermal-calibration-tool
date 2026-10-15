@@ -13,6 +13,8 @@
         <input id="title" class="title-input" value="untitled project" spellcheck="false" />
         <span id="saved" class="muted"></span>
         <span class="spacer"></span>
+        <button id="btn-undo" class="btn" disabled>↶ Undo</button>
+        <button id="btn-redo" class="btn" disabled>↷ Redo</button>
         <button id="btn-new" class="btn">New</button>
         <button id="btn-open" class="btn">Open…</button>
         <button id="btn-save" class="btn">Save</button>
@@ -51,6 +53,7 @@
         <span id="mode-label" class="muted">Thermal</span>
       </footer>
     </div>
+    <div id="tip" hidden></div>
     <div id="modal" hidden></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

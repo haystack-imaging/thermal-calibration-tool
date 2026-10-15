@@ -96,6 +96,8 @@ function applyState(s: AppState) {
   if (document.activeElement !== titleInput) titleInput.value = s.title || "untitled project";
   document.title = (s.title && s.title !== "untitled project" ? s.title + " – " : "") + "Thermal Calibration Tool";
   $("#saved").textContent = s.project_path ? s.project_path.split(/[\\/]/).pop() ?? "" : "";
+  $<HTMLButtonElement>("#btn-undo").disabled = !s.can_undo;
+  $<HTMLButtonElement>("#btn-redo").disabled = !s.can_redo;
   renderAll();
 }
 
@@ -109,7 +111,7 @@ interface Guide {
 }
 
 function openStepAction(n: Step): Guide["action"] {
-  return { label: `Open ${n} · ${STEP_TITLES[n]} ›`, run: () => showStep(n) };
+  return { label: `Open ${n} · ${STEP_TITLES[n]} ›`, run: () => void showStep(n) };
 }
 
 function guideImages(): Guide {
@@ -130,11 +132,14 @@ function guideTargets(): Guide {
   const targets = visibleTargets(ev);
   if (drawing) {
     const t = targets[drawing.target];
-    return { head: `Click corner ${drawing.points.length + 1} of 4 for ${t?.label ?? "the target"}.`, detail: "Any order; the loupe top-left magnifies the pixels under the cursor. Esc cancels.", highlight: drawing.target };
+    const k = drawing.points.length;
+    const label = t?.label ?? "the target";
+    if (k < 3) return { head: `Click corner ${k + 1} of ${label} (at least 3).`, detail: "Any order for a rectangle; a corner clicked again is removed. The loupe top-left magnifies the pixels under the cursor. Esc cancels.", highlight: drawing.target };
+    return { head: `${label}: ${k} corners. Click the ringed first corner (or press Enter) to close it, or add more corners.`, detail: "A corner clicked again is removed; Ctrl+Z removes the last one. Esc cancels.", highlight: drawing.target };
   }
   for (let j = 0; j < targets.length; j++) {
     const t = targets[j];
-    if (t.polygon.length < 3) return { head: `Draw ${t.label} on ${shot}: press Draw, then click the 4 corners of the panel.`, detail: "Zoom in with the mouse wheel first so the panel is large; the dashed outline is the region used.", highlight: j };
+    if (t.polygon.length < 3) return { head: `Draw ${t.label} on ${shot}: click the corners of the panel, then the first corner again to close.`, detail: "Drawing starts by itself; Draw restarts it. Zoom in with the mouse wheel first so the panel is large; the dashed outline is the region used.", highlight: j };
     if (t.mean === null || !isFinite(t.mean)) return { head: `${t.label} lies outside the image or over empty pixels: press Draw and redraw it.`, detail: "", highlight: j };
     if (t.ground_truth === null) return { head: `Type ${value} for ${t.label} into the ${unit()} field.`, detail: thermal ? "Comma or dot. Enter jumps to the next field." : "e.g. 50 % → 0.5. Enter jumps to the next field.", highlight: j };
   }
@@ -203,7 +208,7 @@ function renderRail() {
       if (step === "settings") {
         settingsOpen = !settingsOpen;
         renderRail();
-      } else showStep(Number(step) as Step);
+      } else void showStep(Number(step) as Step);
     }),
   );
   wireRail();
@@ -214,10 +219,10 @@ function bodyImages(): string {
   const mode = state?.settings.mode ?? "thermal";
   const g = guideImages();
   return `${guideHtml(g, "guide-1")}
-<div class="row"><span class="label7">Sensor</span><div class="seg"><button class="seg-btn ${mode === "thermal" ? "selected" : ""}" data-mode="thermal" ${locked ? "disabled" : ""}>Thermal</button><button class="seg-btn ${mode === "msi" ? "selected" : ""}" data-mode="msi" ${locked ? "disabled" : ""}>Multispectral</button></div><span class="help" title="${locked ? "Locked while calibration images are loaded: the sensor type decides how images and reference values are read. New project to start over with the other type." : "Thermal: temperature TIFFs and thermometer readings in °C. Multispectral: one band at a time, reflectance panels with known ρ."}">?</span></div>
+<div class="row"><span class="label7">Sensor</span><div class="seg"><button class="seg-btn ${mode === "thermal" ? "selected" : ""}" data-mode="thermal" ${locked ? "disabled" : ""}>Thermal</button><button class="seg-btn ${mode === "msi" ? "selected" : ""}" data-mode="msi" ${locked ? "disabled" : ""}>Multispectral</button></div><span class="help" data-tip="${locked ? "Locked while calibration images are loaded: the sensor type decides how images and reference values are read. New project to start over with the other type." : "Thermal: temperature TIFFs and thermometer readings in °C. Multispectral: one band at a time, reflectance panels with known ρ."}">?</span></div>
 ${locked ? `<div class="lock-note">Locked while images are loaded. New project to change the sensor type.</div>` : ""}
-${mode === "msi" ? `<div class="row"><span class="label7">Method</span><div class="seg"><button class="seg-btn ${state?.settings.single_point ? "selected" : ""}" data-single="1">Single point</button><button class="seg-btn ${state?.settings.single_point ? "" : "selected"}" data-single="0">Multi point</button></div><span class="help" title="Single point: one panel of known reflectance, the line goes through the origin. Multi point: two or more panels, slope and offset are fitted.">?</span></div>` : ""}
-<div class="row" style="margin-top:8px"><button class="btn accent" id="btn-add-images">Add images…</button><button class="btn" id="btn-remove-image" ${state?.events.length ? "" : "disabled"}>Remove</button><span class="help" title="Images that show the reference targets. One image is enough. Two or more, e.g. before and after the flight, also correct drift: coefficients are interpolated in time between them. Images must be single-band temperature (or DN) files, not colour previews.">?</span></div>
+${mode === "msi" ? `<div class="row"><span class="label7">Method</span><div class="seg"><button class="seg-btn ${state?.settings.single_point ? "selected" : ""}" data-single="1">Single point</button><button class="seg-btn ${state?.settings.single_point ? "" : "selected"}" data-single="0">Multi point</button></div><span class="help" data-tip="Single point: one panel of known reflectance, the line goes through the origin. Multi point: two or more panels, slope and offset are fitted.">?</span></div>` : ""}
+<div class="row" style="margin-top:8px"><button class="btn accent" id="btn-add-images">Add images…</button><button class="btn" id="btn-remove-image" ${state?.events.length ? "" : "disabled"}>Remove</button><span class="help" data-tip="Images that show the reference targets. One image is enough. Two or more, e.g. before and after the flight, also correct drift: coefficients are interpolated in time between them. Images must be single-band temperature (or DN) files, not colour previews.">?</span></div>
 <div class="card listbox" id="calib-list">${(state?.events ?? []).map((e, i) => { const n = state!.events.length; const label = n === 1 ? "Only" : i === 0 ? "Start" : i === n - 1 ? "End" : `Mid${i}`; return `<div class="${i === current ? "selected" : ""}" data-i="${i}">[${label.padEnd(5)}] ${e.timestamp.slice(11, 19)} ${e.timestamp_source.padEnd(9)} ${esc(e.file_name)}</div>`; }).join("")}</div>
 <div class="hint">${state?.events.length ? `${current + 1}/${state.events.length} ${esc(state.events[current].file_name)}` : "No image selected"}</div>`;
 }
@@ -234,12 +239,12 @@ function bodyTargets(): string {
           const stats = t.polygon.length < 3 ? "no polygon yet" : t.mean === null || !isFinite(t.mean) ? "⚠ outside the image or no valid pixels" : `mean ${t.mean.toFixed(2)} ${unit()} · σ ${(t.std ?? 0).toFixed(2)} · n = ${t.pixels}${t.warn_small ? " ⚠ small" : ""}`;
           const isRedrawing = drawing && drawing.target === i;
           const gt = t.ground_truth === null ? "" : String(t.ground_truth);
-          return `<div class="trow ${hl ? "highlight" : ""}" data-t="${i}"><div class="line1"><span class="swatch" style="background:${t.color}"></span>${renaming === i ? `<input class="gt" style="width:90px;text-align:left" id="rename-input" value="${esc(t.name.startsWith("Target ") ? "" : t.name)}" placeholder="name" maxlength="16">` : `<span class="tid" title="Double-click to name this target (black, grey, white…)">T${i + 1}</span>${t.label.includes(" ") ? `<span class="alias">${esc(t.label.split(" ").slice(1).join(" "))}</span>` : ""}`}<button class="btn small" data-draw="${i}">Draw</button><button class="btn small" data-clear="${i}" ${t.polygon.length < 3 ? "disabled" : ""}>Clear</button><input class="gt ${t.ground_truth === null && gt !== "" ? "bad" : ""}" data-gt="${i}" value="${esc(gt)}" style="background:${lighten(t.color)}"><button class="btn small xbtn" data-remove="${i}" ${visibleTargets(ev).length <= 1 ? "disabled" : ""} title="Remove this target from every shot">×</button></div><div class="stats ${t.warn_small ? "warn" : ""}">${isRedrawing ? "redrawing … (Esc keeps the old polygon)" : esc(stats)}</div></div>`;
+          return `<div class="trow ${hl ? "highlight" : ""}" data-t="${i}"><div class="line1"><span class="swatch" style="background:${t.color}"></span>${renaming === i ? `<input class="gt" style="width:90px;text-align:left" id="rename-input" value="${esc(t.name.startsWith("Target ") ? "" : t.name)}" placeholder="name" maxlength="16">` : `<span class="tid" data-tip="Double-click to name this target (black, grey, white…)">T${i + 1}</span>${t.label.includes(" ") ? `<span class="alias">${esc(t.label.split(" ").slice(1).join(" "))}</span>` : ""}`}<button class="btn small" data-draw="${i}">Draw</button><button class="btn small" data-clear="${i}" ${t.polygon.length < 3 ? "disabled" : ""}>Clear</button><input class="gt ${t.ground_truth === null && gt !== "" ? "bad" : ""}" data-gt="${i}" value="${esc(gt)}" style="background:${lighten(t.color)}"><button class="btn small xbtn" data-remove="${i}" ${visibleTargets(ev).length <= 1 ? "disabled" : ""} data-tip="Remove this target from every shot">×</button></div><div class="stats ${t.warn_small ? "warn" : ""}">${isRedrawing ? "redrawing … (Esc keeps the old polygon)" : esc(stats)}</div></div>`;
         })
         .join("")
     : "";
   return `${guideHtml(g, "guide-2")}
-<div class="nav"><button class="btn small" id="btn-prev">‹</button><span class="shot-label">${ev ? `shot ${current + 1} of ${n} · ${label}` : "no shot"}</span><button class="btn small" id="btn-next">›</button><span class="spacer"></span><span class="help" title="Zoom in (wheel), press Draw and click the 4 corners of a panel. The dashed outline is the eroded region actually used. Type the reference reading; Enter jumps to the next field.">?</span></div>
+<div class="nav"><button class="btn small" id="btn-prev">‹</button><span class="shot-label">${ev ? `shot ${current + 1} of ${n} · ${label}` : "no shot"}</span><button class="btn small" id="btn-next">›</button><span class="spacer"></span><span class="help" data-tip="Zoom in (wheel), press Draw and click the 4 corners of a panel. The dashed outline is the eroded region actually used. Type the reference reading; Enter jumps to the next field.">?</span></div>
 <div class="card"><table class="targets"><tr><th style="width:30px">ID</th><th>Polygon</th><th style="text-align:right">truth ${unit()}</th><th></th></tr></table><div id="target-rows">${rowsHtml}</div></div>
 <div class="row" style="margin-top:6px"><button class="btn" id="btn-add-target">+ Add target</button><button class="btn" id="btn-copy" ${n > 1 ? "" : "disabled"}>Copy to other shots</button></div>
 <div class="hint">Wheel: zoom · right-drag: pan · Esc: cancel drawing · comma or dot accepted · ROI edge inset: see Settings</div>`;
@@ -258,7 +263,7 @@ function bodyProcess(): string {
   return `${guideHtml(g, "guide-3")}
 <div class="field-label">Survey folder (every image in it; narrow down with the filter)</div><div class="field"><input id="survey-folder" value="${esc(sv?.folder ?? "")}"><button class="btn small" id="btn-browse-survey">Browse</button></div>
 <div class="field-label">Output folder</div><div class="field"><input id="output-folder" value="${esc(sv?.output_folder ?? "")}"><button class="btn small" id="btn-browse-output">Browse</button></div>
-<div class="field-label">Filename filter</div><div class="field"><input id="name-filter" class="mono" style="max-width:140px" value="${esc(sv?.filter ?? "")}"><span class="help" title="Only files whose name contains this text are processed, e.g. '_T_deg' to skip the colour previews next to the temperature TIFFs, or '_3' for one multispectral band.">?</span></div>
+<div class="field-label">Filename filter</div><div class="field"><input id="name-filter" class="mono" style="max-width:140px" value="${esc(sv?.filter ?? "")}"><span class="help" data-tip="Only files whose name contains this text are processed, e.g. '_T_deg' to skip the colour previews next to the temperature TIFFs, or '_3' for one multispectral band.">?</span></div>
 <div class="hint">Choosing a folder runs the pre-flight check and lists the images; then press Run.</div>`;
 }
 
@@ -268,8 +273,8 @@ function bodySettings(): string {
   if (!s || !sv) return "";
   const em = s.emissivity;
   return `<div class="hint" style="margin:2px 0 6px">Saved in the project file; applied to every shot and every survey image.</div>
-<div class="row"><span class="small">ROI edge inset (px)</span><input class="num" id="inset" type="number" min="0" max="20" value="${s.roi_inset_px}"><span class="help" title="Pixels removed from the polygon edge before the mean is taken. Thermal sensors blur edges over 2 to 3 px, so edge pixels are mixed with the background. 3 px is a good default; the dashed outline on the image shows the region actually used.">?</span></div>
-<div class="chk" style="margin-top:10px"><input type="checkbox" id="em-enabled" ${em.enabled ? "checked" : ""}><label for="em-enabled">Emissivity correction (advanced)</label><span class="help" title="Usually OFF. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies its own emissivity setting (0.95 by default) when converting R-JPEGs. When ON the reference readings are converted to apparent temperature with the panel emissivity before the fit, m and b are applied to raw pixels, and the result is converted to surface temperature with the scene emissivity. T_app⁴ = ε·T_obj⁴ + (1−ε)·T_sky⁴">?</span></div>
+<div class="row"><span class="small">ROI edge inset (px)</span><input class="num" id="inset" type="number" min="0" max="20" value="${s.roi_inset_px}"><span class="help" data-tip="Pixels removed from the polygon edge before the mean is taken. Thermal sensors blur edges over 2 to 3 px, so edge pixels are mixed with the background. 3 px is a good default; the dashed outline on the image shows the region actually used.">?</span></div>
+<div class="chk" style="margin-top:10px"><input type="checkbox" id="em-enabled" ${em.enabled ? "checked" : ""}><label for="em-enabled">Emissivity correction (advanced)</label><span class="help" data-tip="Usually OFF. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies its own emissivity setting (0.95 by default) when converting R-JPEGs. When ON the reference readings are converted to apparent temperature with the panel emissivity before the fit, m and b are applied to raw pixels, and the result is converted to surface temperature with the scene emissivity. T_app⁴ = ε·T_obj⁴ + (1−ε)·T_sky⁴">?</span></div>
 <div class="row"><span class="small" style="width:190px">Panel emissivity ε (0.5 to 1)</span><input class="num" id="em-target" value="${em.target_emissivity}"></div>
 <div class="row"><span class="small" style="width:190px">Scene emissivity ε (0.5 to 1)</span><input class="num" id="em-scene" value="${em.scene_emissivity}"></div>
 <div class="row"><span class="small" style="width:190px">Sky temperature T_sky (°C)</span><input class="num" id="em-sky" value="${em.sky_temperature}"></div>
@@ -307,7 +312,7 @@ function wireRail() {
       });
     }
   });
-  on("#btn-add-target", "click", () => void update("add_target"));
+  on("#btn-add-target", "click", () => void addTargetAndDraw());
   on("#btn-copy", "click", () => void update("copy_polygons", { source: current }));
   on("#btn-browse-survey", "click", () => void browseSurvey());
   on("#btn-browse-output", "click", () => void browseOutput());
@@ -392,8 +397,75 @@ function startDrawing(target: number) {
   drawing = { target, points: [], redo: t.polygon.length >= 3 };
   viewer.drawing = drawing.points;
   viewer.activeTarget = target;
-  status(`Drawing ${t.label}: click the 4 corners of the panel${drawing.redo ? " (Esc brings the old polygon back)" : " (Esc cancels)"}.`);
+  (document.activeElement as HTMLElement | null)?.blur(); // Enter must close the polygon, not press a button
+  status(`Drawing ${t.label}: click the corners of the panel, then the first corner again (or Enter) to close${drawing.redo ? "; Esc brings the old polygon back" : "; Esc cancels"}.`);
   renderAll();
+}
+
+/** The polygon is closed (first corner clicked again, or Enter): measure it and move on to the reading. */
+function finishDrawing() {
+  if (!drawing || drawing.points.length < 3) return;
+  const { target, points } = drawing;
+  drawing = null;
+  viewer.drawing = null;
+  viewer.activeTarget = null;
+  void update("set_polygon", { event: current, target, polygon: points }).then(() => {
+    const t = currentEvent()?.targets[target];
+    status(t ? `${t.label}: mean ${t.mean?.toFixed(2)} ${unit()} over ${t.pixels} px.` : "Polygon set.");
+    if (t && t.ground_truth === null) {
+      const gt = document.querySelector<HTMLInputElement>(`[data-gt="${target}"]`);
+      gt?.focus();
+      gt?.select();
+    }
+  });
+}
+
+/** On entering step 2: the first target without a polygon is ready to draw, no click needed. */
+function maybeAutoDraw() {
+  const ev = currentEvent();
+  if (!ev || drawing) return;
+  const j = visibleTargets(ev).findIndex((t) => t.polygon.length < 3);
+  if (j >= 0) startDrawing(j);
+}
+
+async function addTargetAndDraw() {
+  cancelDrawing(true);
+  await update("add_target");
+  const ev = currentEvent();
+  if (ev) startDrawing(visibleTargets(ev).length - 1);
+}
+
+async function undo() {
+  if (!state?.can_undo) {
+    status("Nothing to undo.");
+    return;
+  }
+  cancelDrawing(true);
+  await update("undo");
+  status("Undone." + (state?.can_undo ? "" : " Nothing more to undo."));
+}
+
+async function redo() {
+  if (!state?.can_redo) {
+    status("Nothing to redo.");
+    return;
+  }
+  cancelDrawing(true);
+  await update("redo");
+  status("Redone.");
+}
+
+/** Shots whose targets are not all complete, for the warning when leaving Targets. */
+function missingTargets(): string[] {
+  if (!state) return [];
+  const out: string[] = [];
+  state.events.forEach((e, i) => {
+    const miss = visibleTargets(e)
+      .filter((t) => !t.complete)
+      .map((t) => `${t.label} (${t.polygon.length < 3 ? "no polygon" : t.ground_truth === null ? "no reading" : "no valid pixels"})`);
+    if (miss.length) out.push(`shot ${i + 1} (${e.file_name}): ${miss.join(", ")}`);
+  });
+  return out;
 }
 
 function cancelDrawing(silent = false) {
@@ -584,34 +656,38 @@ function renderAll() {
   renderTimeline($("#timeline"), state?.events ?? [], state?.survey_timeline ?? []);
 }
 
-function showStep(n: Step) {
+async function showStep(n: Step) {
+  if (n === 3 && activeStep !== 3 && state?.events.length) {
+    const missing = missingTargets();
+    if (missing.length) {
+      const go = await alert("Targets missing", `Not every target is complete on every shot:\n\n${missing.join("\n")}\n\nAn incomplete target is left out of that shot's fit.`, [{ label: "Back to targets", value: false }, { label: "Continue anyway", accent: true, value: true }]);
+      if (!go) {
+        void showStep(2);
+        return;
+      }
+    }
+  }
+  const previous = activeStep;
   activeStep = n;
   settingsOpen = false;
   if (n === 3 && state?.survey.folder) void runPreflight();
   renderAll();
+  if (n === 2 && previous !== 2) maybeAutoDraw();
 }
 
 // ----------------------------------------------------------------------------- viewer wiring
 
 viewer.onClick = (x, y) => {
   if (!drawing) return;
-  drawing.points.push([x, y]);
+  const hit = viewer.hitPoint(x, y);
+  if (hit === 0 && drawing.points.length >= 3) {
+    finishDrawing(); // the ringed first corner closes the polygon
+    return;
+  }
+  if (hit >= 0) drawing.points.splice(hit, 1); // a corner clicked again is removed
+  else drawing.points.push([x, y]);
   viewer.drawing = drawing.points;
-  if (drawing.points.length >= 4) {
-    const { target, points } = drawing;
-    drawing = null;
-    viewer.drawing = null;
-    viewer.activeTarget = null;
-    void update("set_polygon", { event: current, target, polygon: points }).then(() => {
-      const t = currentEvent()?.targets[target];
-      status(t ? `${t.label}: mean ${t.mean?.toFixed(2)} ${unit()} over ${t.pixels} px.` : "Polygon set.");
-      if (t && t.ground_truth === null) {
-        const gt = document.querySelector<HTMLInputElement>(`[data-gt="${target}"]`);
-        gt?.focus();
-        gt?.select();
-      }
-    });
-  } else renderAll();
+  renderAll();
 };
 viewer.onMotion = (x, y, v) => {
   const ev = currentEvent();
@@ -688,15 +764,88 @@ $("#btn-save").addEventListener("click", () => void save(false));
 $("#btn-save-as").addEventListener("click", () => void save(true));
 $("#btn-help").addEventListener("click", () => void alert("How to use", "1 · Images: choose the sensor type (locked once images are loaded), then add every calibration shot of the flight that shows your reference panels (single-band temperature TIFFs) and open 2 · Targets.\n2 · Targets: the green card says what to do next. Zoom in (wheel), press Draw for a target and click its 4 corners, type the reference reading, repeat on every shot.\n3 · Process: choose the survey folder and the output folder, then Run.\nSettings (bottom of the rail): ROI edge inset, emissivity correction, metadata copy, skipping existing outputs; all saved in the project file.\n\nThe fit panel on the right updates as you enter readings; with 3 or more targets you get an uncertainty estimate."));
 window.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = e.key.toLowerCase();
+  const target = e.target as HTMLElement | null;
+  const inInput = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+  if (ctrl && key === "s") {
     e.preventDefault();
     void save(e.shiftKey);
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+  } else if (ctrl && key === "o") {
     e.preventDefault();
     $("#btn-open").click();
+  } else if (ctrl && key === "z" && !e.shiftKey) {
+    e.preventDefault();
+    if (drawing) {
+      drawing.points.pop();
+      viewer.drawing = drawing.points;
+      renderAll();
+    } else {
+      if (inInput) target?.blur(); // a value still being typed is committed first, then undone
+      void undo();
+    }
+  } else if (ctrl && (key === "y" || (key === "z" && e.shiftKey))) {
+    e.preventDefault();
+    if (inInput) target?.blur();
+    void redo();
+  } else if (e.key === "Enter" && drawing && !inInput) {
+    e.preventDefault();
+    finishDrawing();
   }
 });
+$("#btn-undo").addEventListener("click", () => void undo());
+$("#btn-redo").addEventListener("click", () => void redo());
+
+// ----------------------------------------------------------------------------- help popups
+
+const tip = $("#tip");
+let tipPinned: HTMLElement | null = null;
+let tipTimer: number | null = null;
+function showTip(el: HTMLElement) {
+  const text = el.dataset.tip;
+  if (!text) return;
+  tip.textContent = text;
+  tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  let left = r.left;
+  if (left + tip.offsetWidth > window.innerWidth - 12) left = window.innerWidth - 12 - tip.offsetWidth;
+  let top = r.bottom + 6;
+  if (top + tip.offsetHeight > window.innerHeight - 8) top = r.top - 6 - tip.offsetHeight;
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${Math.max(8, top)}px`;
+}
+document.addEventListener("mouseover", (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tip]");
+  if (!el || tipPinned) return;
+  if (tipTimer) clearTimeout(tipTimer);
+  tipTimer = window.setTimeout(() => showTip(el), 250);
+});
+document.addEventListener("mouseout", (e) => {
+  if (!(e.target as HTMLElement).closest("[data-tip]")) return;
+  if (tipTimer) clearTimeout(tipTimer);
+  if (!tipPinned) tip.hidden = true;
+});
+document.addEventListener("click", (e) => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-tip]");
+  if (el?.classList.contains("help")) {
+    e.preventDefault();
+    if (tipPinned === el) {
+      tipPinned = null;
+      tip.hidden = true;
+    } else {
+      tipPinned = el;
+      showTip(el);
+    }
+    return;
+  }
+  if (tipPinned) {
+    tipPinned = null;
+    tip.hidden = true;
+  }
+});
+
+// the timeline draws at its real width: a window resize (full screen) must redraw it, not stretch it
+new ResizeObserver(() => renderTimeline($("#timeline"), state?.events ?? [], state?.survey_timeline ?? [])).observe($("#timeline"));
 
 // ----------------------------------------------------------------------------- batch events
 
@@ -735,7 +884,7 @@ declare global {
       rows: () => Row[];
       viewer: Viewer;
       selectShot: (i: number) => Promise<void>;
-      showStep: (n: Step) => void;
+      showStep: (n: Step) => Promise<void>;
       guidance: () => { images: Guide; targets: Guide; process: Guide };
       pickImages: () => Promise<string[]>;
     };

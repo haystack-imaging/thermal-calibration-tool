@@ -220,6 +220,13 @@ export class Viewer {
     return [cx / this.scale + this.ox, cy / this.scale + this.oy];
   }
 
+  /** Index of the corner being drawn that lies under image point (x, y), or -1. */
+  hitPoint(x: number, y: number): number {
+    if (!this.drawing) return -1;
+    const tol = Math.max(2, 8 / this.scale);
+    return this.drawing.findIndex(([px, py]) => Math.hypot(px - x, py - y) <= tol);
+  }
+
   private clamp() {
     if (!this.image) return;
     const [W, H] = this.size();
@@ -351,11 +358,30 @@ export class Viewer {
         pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
         ctx.stroke();
       }
-      for (const [x, y] of pts) {
+      if (pts.length >= 3) {
+        // the closing edge, dashed: a click on the ringed first corner (or Enter) closes the polygon
+        ctx.setLineDash([5, 4]);
         ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+        ctx.lineTo(pts[0][0], pts[0][1]);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
+      pts.forEach(([x, y], i) => {
+        ctx.beginPath();
+        if (i === 0 && pts.length >= 3) {
+          ctx.arc(x, y, 7, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.fill();
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.fillStyle = color;
+          ctx.lineWidth = 2;
+        } else {
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
     }
   }
 

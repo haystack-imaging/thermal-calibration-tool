@@ -71,6 +71,9 @@ pub struct Inner {
     last_output: Option<PathBuf>,
     cancel: Arc<AtomicBool>,
     running: bool,
+    /// Undo history: the targets and fits of every shot before each change (newest last).
+    undo: Vec<Vec<CalibrationEvent>>,
+    redo: Vec<Vec<CalibrationEvent>>,
 }
 
 pub struct AppState(pub Mutex<Inner>);
@@ -131,6 +134,15 @@ impl Inner {
         }
         self.refit_all();
         Ok(())
+    }
+
+    /// Remember the shots as they are, before a change that the user may want to take back.
+    fn snapshot(&mut self) {
+        self.undo.push(self.events.clone());
+        if self.undo.len() > 50 {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
     }
 
     fn sort_events(&mut self) {
@@ -250,6 +262,8 @@ pub struct StateDto {
     pub survey_timeline: Vec<TimelinePoint>,
     pub last_output: Option<String>,
     pub running: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
 }
 
 #[derive(Serialize)]
@@ -421,6 +435,8 @@ fn state_dto(inner: &mut Inner) -> StateDto {
             .as_ref()
             .map(|p| p.to_string_lossy().to_string()),
         running: inner.running,
+        can_undo: !inner.undo.is_empty(),
+        can_redo: !inner.redo.is_empty(),
     }
 }
 
@@ -452,6 +468,7 @@ fn add_calibration_images(paths: Vec<String>, state: Shared) -> Result<AddResult
         .max()
         .unwrap_or(2);
     let (mut rejected, mut duplicates, mut added) = (Vec::new(), Vec::new(), 0usize);
+    let mut fresh: Vec<CalibrationEvent> = Vec::new();
     for p in paths {
         let path = PathBuf::from(&p);
         let abs = std::path::absolute(&path).unwrap_or_else(|_| path.clone());
@@ -482,10 +499,12 @@ fn add_calibration_images(paths: Vec<String>, state: Shared) -> Result<AddResult
             ev.add_target();
         }
         existing.push(abs);
-        inner.events.push(ev);
+        fresh.push(ev);
         added += 1;
     }
-    if added > 0 {
+    if !fresh.is_empty() {
+        inner.snapshot();
+        inner.events.extend(fresh);
         inner.sort_events();
     }
     Ok(AddResult {
@@ -506,6 +525,7 @@ fn remove_calibration_image(index: usize, state: Shared) -> Result<StateDto, Str
     if index >= inner.events.len() {
         return Err("no such image".into());
     }
+    inner.snapshot();
     let ev = inner.events.remove(index);
     inner.cache.remove(&ev.image_path);
     Ok(state_dto(&mut inner))
@@ -546,12 +566,19 @@ fn set_polygon(
     state: Shared,
 ) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    inner.snapshot();
     let t = inner
         .events
         .get_mut(event)
         .and_then(|e| e.targets.get_mut(target))
         .ok_or("no such target")?;
-    t.polygon = order_corners(&polygon.iter().map(|p| (p[0], p[1])).collect::<Vec<_>>());
+    let pts: Vec<(i32, i32)> = polygon.iter().map(|p| (p[0], p[1])).collect();
+    // four clicks in any order make a rectangle (never a bow-tie); more corners keep the drawn order
+    t.polygon = if pts.len() == 4 {
+        order_corners(&pts)
+    } else {
+        pts
+    };
     inner.remeasure(event)?;
     inner.refit(event);
     Ok(state_dto(&mut inner))
@@ -560,6 +587,7 @@ fn set_polygon(
 #[tauri::command]
 fn clear_polygon(event: usize, target: usize, state: Shared) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    inner.snapshot();
     let t = inner
         .events
         .get_mut(event)
@@ -579,6 +607,15 @@ fn set_ground_truth(
     state: Shared,
 ) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    let wanted = value.filter(|v| v.is_finite());
+    if inner
+        .events
+        .get(event)
+        .and_then(|e| e.targets.get(target))
+        .is_some_and(|t| t.ground_truth != wanted)
+    {
+        inner.snapshot();
+    }
     let t = inner
         .events
         .get_mut(event)
@@ -608,6 +645,7 @@ fn add_target(state: Shared) -> Result<StateDto, String> {
             thermal_core::COLOR_PALETTE.len()
         ));
     }
+    inner.snapshot();
     for e in &mut inner.events {
         while e.targets.len() < n {
             e.add_target();
@@ -619,6 +657,13 @@ fn add_target(state: Shared) -> Result<StateDto, String> {
 #[tauri::command]
 fn remove_target(index: usize, state: Shared) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    if inner
+        .events
+        .iter()
+        .any(|e| e.targets.len() > 1 && index < e.targets.len())
+    {
+        inner.snapshot();
+    }
     for e in &mut inner.events {
         e.remove_target(index, 1);
     }
@@ -629,6 +674,7 @@ fn remove_target(index: usize, state: Shared) -> Result<StateDto, String> {
 #[tauri::command]
 fn rename_target(index: usize, name: String, state: Shared) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    inner.snapshot();
     let name: String = name.trim().chars().take(16).collect();
     for (i, e) in inner.events.iter_mut().enumerate() {
         if let Some(t) = e.targets.get_mut(index) {
@@ -648,6 +694,7 @@ fn rename_target(index: usize, name: String, state: Shared) -> Result<StateDto, 
 #[tauri::command]
 fn copy_polygons(source: usize, state: Shared) -> Result<StateDto, String> {
     let mut inner = lock(&state);
+    inner.snapshot();
     let src = inner
         .events
         .get(source)
@@ -922,6 +969,8 @@ fn open_project_into(inner: &mut Inner, path: &str) -> Result<Vec<String>, Strin
     inner.cache.clear();
     inner.survey_timestamps.clear();
     inner.last_output = None;
+    inner.undo.clear();
+    inner.redo.clear();
     inner.refit_all();
     inner.title = project
         .get("title")
@@ -1121,6 +1170,8 @@ pub fn run() {
             open_in_file_manager,
             fit_report_html,
             write_text_file,
+            undo,
+            redo,
             e2e_report,
             e2e_done,
         ])
@@ -1293,6 +1344,26 @@ fn schedule_screenshot(handle: AppHandle, _path: String, delay: u64) {
         eprintln!("--screenshot is only implemented on Linux");
         handle.exit(2);
     });
+}
+
+#[tauri::command]
+fn undo(state: Shared) -> StateDto {
+    let mut inner = lock(&state);
+    if let Some(prev) = inner.undo.pop() {
+        let now = std::mem::replace(&mut inner.events, prev);
+        inner.redo.push(now);
+    }
+    state_dto(&mut inner)
+}
+
+#[tauri::command]
+fn redo(state: Shared) -> StateDto {
+    let mut inner = lock(&state);
+    if let Some(next) = inner.redo.pop() {
+        let now = std::mem::replace(&mut inner.events, next);
+        inner.undo.push(now);
+    }
+    state_dto(&mut inner)
 }
 
 // ----------------------------------------------------------------------------- end-to-end harness
