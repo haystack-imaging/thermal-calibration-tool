@@ -98,6 +98,10 @@ export class Viewer {
   cursor: { x: number; y: number } | null = null;
   placeholder = "";
   stretch: [number, number] = [0, 1];
+  /** Shown next to the cursor, e.g. "°C". */
+  unit = "°C";
+  /** The finite value under the cursor, if any. */
+  hoverValue: number | null = null;
   onClick: (x: number, y: number) => void = () => {};
   onMotion: (x: number, y: number, value: number | null) => void = () => {};
   onViewChange: (scale: number) => void = () => {};
@@ -115,6 +119,7 @@ export class Viewer {
     window.addEventListener("mouseup", () => (this.panStart = null));
     canvas.addEventListener("mouseleave", () => {
       this.cursor = null;
+      this.hoverValue = null;
       this.redraw();
     });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -283,7 +288,8 @@ export class Viewer {
       const [ix, iy] = this.toImage(cx, cy);
       const inside = ix >= 0 && iy >= 0 && ix < this.image.width && iy < this.image.height;
       const v = inside ? this.image.data[Math.floor(iy) * this.image.width + Math.floor(ix)] : null;
-      this.onMotion(Math.floor(ix), Math.floor(iy), v === null || !isFinite(v) ? null : v);
+      this.hoverValue = v === null || !isFinite(v) ? null : v;
+      this.onMotion(Math.floor(ix), Math.floor(iy), this.hoverValue);
     }
     this.redraw();
   }
@@ -306,6 +312,7 @@ export class Viewer {
     ctx.drawImage(this.off, dx, dy, this.image.width * this.scale, this.image.height * this.scale);
     this.drawOverlay(ctx);
     this.drawColorBar(ctx, W, H);
+    if (this.cursor && this.hoverValue !== null) this.drawReadout(ctx, W, H);
     if (this.drawing && this.cursor) this.drawLoupe(ctx);
   }
 
@@ -402,6 +409,24 @@ export class Viewer {
     ctx.fillText(this.stretch[1].toFixed(1), x - 4, y0);
     ctx.textBaseline = "bottom";
     ctx.fillText(this.stretch[0].toFixed(1), x - 4, y0 + h);
+  }
+
+  /** A half-transparent label next to the cursor with the value under it. */
+  private drawReadout(ctx: CanvasRenderingContext2D, W: number, H: number) {
+    const text = `${this.hoverValue!.toFixed(2)} ${this.unit}`;
+    ctx.font = "bold 13px system-ui, sans-serif";
+    const w = ctx.measureText(text).width + 14;
+    const h = 24;
+    let x = this.cursor!.x + 16;
+    let y = this.cursor!.y + 16;
+    if (x + w > W - 8) x = this.cursor!.x - 16 - w;
+    if (y + h > H - 8) y = this.cursor!.y - 16 - h;
+    ctx.fillStyle = "rgba(29, 35, 32, 0.6)";
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + 7, y + h / 2);
   }
 
   private drawLoupe(ctx: CanvasRenderingContext2D) {

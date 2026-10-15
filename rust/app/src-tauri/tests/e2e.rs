@@ -104,6 +104,7 @@ fn full_flow_on_the_golden_flight() {
         "output": work.join("calibrated").to_string_lossy(),
         "project": work.join("flight-e2e.calib.json").to_string_lossy(),
         "report": work.join("fit_report.html").to_string_lossy(),
+        "csv": work.join("inspect_table.csv").to_string_lossy(),
     });
     let env_file = work.join("env.json");
     std::fs::write(&env_file, serde_json::to_string_pretty(&env).unwrap()).unwrap();
@@ -173,6 +174,16 @@ fn full_flow_on_the_golden_flight() {
     assert_eq!(csv.lines().count(), 7, "header + 6 rows");
     assert!(work.join("calibrated/survey_0_calibrated.tif").exists());
     assert!(work.join("flight-e2e.calib.json").exists() && work.join("fit_report.html").exists());
+    let table = std::fs::read_to_string(work.join("inspect_table.csv")).expect("inspect_table.csv");
+    assert_eq!(table.lines().count(), 2, "header + P1: {table}");
+    assert!(
+        table
+            .lines()
+            .nth(1)
+            .unwrap()
+            .starts_with("survey_0_calibrated.tif,P1,"),
+        "{table}"
+    );
     let saved: Value =
         serde_json::from_str(&std::fs::read_to_string(work.join("flight-e2e.calib.json")).unwrap())
             .unwrap();

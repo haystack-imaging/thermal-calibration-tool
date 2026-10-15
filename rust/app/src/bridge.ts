@@ -8,6 +8,7 @@ export interface E2eHooks {
   pickProjectToOpen?: () => Promise<string | null>;
   pickProjectToSave?: (defaultName: string) => Promise<string | null>;
   pickReportToSave?: (defaultName: string) => Promise<string | null>;
+  pickCsvToSave?: (defaultName: string) => Promise<string | null>;
   env?: Record<string, unknown>;
 }
 
@@ -79,6 +80,14 @@ export async function pickProjectToSave(defaultName: string): Promise<string | n
   if (window.__e2e?.pickProjectToSave) return window.__e2e.pickProjectToSave(defaultName);
   if (isTauri()) {
     return dialogSave({ title: "Save project", defaultPath: defaultName, filters: [{ name: "Project", extensions: ["json"] }] });
+  }
+  return defaultName;
+}
+
+export async function pickCsvToSave(defaultName: string): Promise<string | null> {
+  if (window.__e2e?.pickCsvToSave) return window.__e2e.pickCsvToSave(defaultName);
+  if (isTauri()) {
+    return dialogSave({ title: "Save table", defaultPath: defaultName, filters: [{ name: "CSV", extensions: ["csv"] }] });
   }
   return defaultName;
 }

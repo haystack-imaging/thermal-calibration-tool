@@ -130,6 +130,29 @@ export interface BatchDone {
 
 export type Row = Record<string, string | number | boolean | null>;
 
+export interface InspectImage {
+  name: string;
+  path: string;
+}
+
+export interface InspectDto {
+  images: InspectImage[];
+}
+
+export interface InspectAddResult {
+  added: number;
+  rejected: string[];
+  inspect: InspectDto;
+}
+
+export interface PolygonStats {
+  mean: number | null;
+  std: number | null;
+  min: number | null;
+  max: number | null;
+  count: number;
+}
+
 /** Prediction uncertainty of a fit at sensor value x (1 sigma); null below three targets. */
 export function predictUncertainty(f: Fit, x: number): number | null {
   if (f.single_point || f.n < 3 || f.sxx <= 0 || f.resid_std === null) return null;

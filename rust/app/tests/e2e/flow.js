@@ -203,7 +203,40 @@ await e2e.wait(300);
 if (!document.querySelector("#modal").hidden) e2e.click("#modal button.accent");
 await e2e.until(() => state().last_output, 60000);
 await e2e.report("batch done", app().rows().length === 6 && app().rows().every((r) => r.status === "ok") && /Done: 6 ok/.test(e2e.$("#process-view").textContent), app().rows().map((r) => r.input_filename + " " + r.slope_m));
-await e2e.report("done guidance offers the output folder", /Done\./.test(app().guidance().process.head));
+await e2e.report("done guidance offers to inspect the results", /Done\./.test(app().guidance().process.head) && /Inspect the results/.test(app().guidance().process.action.label));
+
+// ---------------------------------------------------------------- hover readout and the Inspect section
+e2e.click("#guide-3");
+await e2e.until(() => app().inspecting() && app().inspect().images.length === 6 && app().viewer.image);
+await e2e.report("the results open in Inspect", app().inspect().images.every((im) => /_calibrated\.tif$/.test(im.name)) && /Inspect/.test(e2e.$("#fit-panel").textContent));
+{
+  const canvas = e2e.$("#viewer");
+  const r = canvas.getBoundingClientRect();
+  const [cx, cy] = app().viewer.toCanvas(100.5, 100.5);
+  e2e.mouse(canvas, "mousemove", r.left + cx, r.top + cy);
+  await e2e.until(() => app().viewer.hoverValue !== null);
+  const img = app().viewer.image;
+  await e2e.report("hovering shows the value under the cursor", Math.abs(app().viewer.hoverValue - img.data[100 * img.width + 100]) < 1e-6 && app().viewer.unit === "°C", { value: app().viewer.hoverValue });
+}
+e2e.click("#btn-inspect-draw");
+await e2e.until(() => app().drawing());
+for (const [x, y] of [[20, 20], [120, 20], [120, 120], [20, 120]]) clickImage(x, y);
+keyWindow("Enter");
+await e2e.until(() => app().inspectPolys().length === 1 && app().inspectPolys()[0].stats);
+{
+  const st = app().inspectPolys()[0].stats;
+  await e2e.report("a polygon in Inspect reports mean, σ, min, max and pixels", st.count === 101 * 101 && st.min <= st.mean && st.mean <= st.max && /P1/.test(e2e.$("#fit-panel").textContent), st);
+}
+e2e.pickCsvToSave = async () => env.csv;
+e2e.click("#btn-inspect-save");
+await e2e.until(() => /Table saved/.test(e2e.$("#status-text").textContent));
+await e2e.report("the table is saved as CSV", true);
+e2e.click("#btn-inspect-next");
+await e2e.until(() => e2e.$("#image-name").textContent === app().inspect().images[1].name && app().viewer.image);
+await e2e.report("polygons belong to their image", app().inspectPolys().length === 0);
+e2e.click("#btn-inspect-back");
+await e2e.until(() => !app().inspecting() && app().activeStep() === 3 && !document.querySelector("#process-view").hidden);
+await e2e.report("back to the calibration", true);
 
 // ---------------------------------------------------------------- report, save, open, new
 e2e.pickReportToSave = async () => env.report;

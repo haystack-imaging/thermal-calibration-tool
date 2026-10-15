@@ -2,10 +2,10 @@
 // view, the fit panel, the timeline and the process view. Rendering is "replace the HTML of a
 // region from the state"; the canvas viewer keeps its own state (zoom, pan, pixels).
 
-import { invoke, listen, pickFolder, pickImages, pickProjectToOpen, pickProjectToSave, pickReportToSave } from "./bridge";
+import { invoke, listen, pickCsvToSave, pickFolder, pickImages, pickProjectToOpen, pickProjectToSave, pickReportToSave } from "./bridge";
 import { plotSvg, renderFitPanel } from "./fitpanel";
 import { renderTimeline } from "./timeline";
-import { decodePixels, type AddResult, type AppState, type BatchDone, type CalEvent, type ImagePayload, type Point, type Preflight, type Row } from "./types";
+import { decodePixels, type AddResult, type AppState, type BatchDone, type CalEvent, type ImagePayload, type InspectAddResult, type InspectDto, type Point, type PolygonStats, type Preflight, type Row, type Target } from "./types";
 import { Viewer, type VizMode } from "./viewer";
 
 type Step = 1 | 2 | 3;
@@ -17,7 +17,14 @@ let state: AppState | null = null;
 let current = 0; // selected calibration shot
 let activeStep: Step = 1;
 let settingsOpen = false;
-let drawing: { target: number; points: Point[]; redo: boolean } | null = null;
+let drawing: { target: number; points: Point[]; redo: boolean; inspect?: boolean } | null = null;
+// the Inspect section: any single-band images, viewed and measured, not part of the project
+let inspecting = false;
+let inspect: InspectDto = { images: [] };
+let inspectCurrent = 0;
+const inspectPolys = new Map<string, { points: Point[]; stats: PolygonStats | null }[]>();
+const PALETTE = ["#E63946", "#2A9D8F", "#E9C46A", "#4C7BD9", "#F4A261", "#9B5DE5", "#00F5D4", "#F15BB5", "#00BBF9", "#B8E986"];
+const CAL_PLACEHOLDER = "No calibration image yet.\n\nChoose the sensor type and add the images that show your reference targets (1 · Images, left).";
 let preflight: Preflight | null = null;
 let rows: Row[] = [];
 let pending: string[] = [];
@@ -27,7 +34,7 @@ let renaming: number | null = null;
 const imageCache = new Map<string, ImagePayload>();
 
 const viewer = new Viewer($("#viewer"));
-viewer.placeholder = "No calibration image yet.\n\nChoose the sensor type and add the images that show your reference targets (1 · Images, left).";
+viewer.placeholder = CAL_PLACEHOLDER;
 
 // ----------------------------------------------------------------------------- helpers
 
@@ -96,6 +103,7 @@ function applyState(s: AppState) {
   if (document.activeElement !== titleInput) titleInput.value = s.title || "untitled project";
   document.title = (s.title && s.title !== "untitled project" ? s.title + " – " : "") + "Thermal Calibration Tool";
   $("#saved").textContent = s.project_path ? s.project_path.split(/[\\/]/).pop() ?? "" : "";
+  viewer.unit = s.settings.mode === "thermal" ? "°C" : "DN";
   $<HTMLButtonElement>("#btn-undo").disabled = !s.can_undo;
   $<HTMLButtonElement>("#btn-redo").disabled = !s.can_redo;
   renderAll();
@@ -158,7 +166,7 @@ function guideProcess(): Guide {
   if (state.events.some((e) => !e.fit)) return { head: "Finish the targets first: every calibration shot needs a complete fit.", detail: "", action: openStepAction(2) };
   if (state.running) return { head: "Calibrating… the results table fills up as the images are written.", detail: "Cancel stops after the current image." };
   if (!state.survey.folder) return { head: "Choose the survey folder: press Browse. Every image in it is calibrated.", detail: "The outputs go to <survey folder>/calibrated unless you pick another output folder. The filename filter narrows the set down (e.g. _T_deg).", action: { label: "Browse…", run: browseSurvey } };
-  if (state.last_output) return { head: `Done. The calibrated images, the log and the project file are in ${state.last_output.split(/[\\/]/).pop()}.`, detail: "Choose another survey folder to process the next flight.", action: { label: "Open output folder", run: () => void call("open_in_file_manager", { path: state!.last_output }) } };
+  if (state.last_output) return { head: `Done. The calibrated images, the log and the project file are in ${state.last_output.split(/[\\/]/).pop()}.`, detail: "Inspect opens the calibrated images for a look: hover for temperatures, draw polygons for averages. Open output folder is in the results header. Choose another survey folder to process the next flight.", action: { label: "Inspect the results ›", run: () => void inspectResults() } };
   if (!preflight) return { head: "Reading the capture times of the survey images…", detail: "The pre-flight check runs when that is done." };
   if (preflight.blocking) return { head: "Fix the problems listed in the pre-flight check (centre), then press Run.", detail: "" };
   const n = preflight.files.length;
@@ -195,8 +203,10 @@ function renderRail() {
   for (const n of [1, 2, 3] as Step[]) {
     const [done, summary] = stepDone(n);
     const active = n === activeStep;
-    parts.push(`<div class="step ${active ? "active" : ""} ${done ? "done" : ""}" data-step="${n}"><div class="step-header"><div class="badge">${done ? "✓" : n}</div><div><div class="step-title">${n} · ${STEP_TITLES[n]}</div><div class="step-summary">${esc(summary)}</div></div><span class="chevron">${active && !settingsOpen ? "⌄" : "›"}</span></div>${active && !settingsOpen ? `<div class="step-body">${n === 1 ? bodyImages() : n === 2 ? bodyTargets() : bodyProcess()}</div>` : ""}</div>`);
+    parts.push(`<div class="step ${active ? "active" : ""} ${done ? "done" : ""}" data-step="${n}"><div class="step-header"><div class="badge">${done ? "✓" : n}</div><div><div class="step-title">${n} · ${STEP_TITLES[n]}</div><div class="step-summary">${esc(summary)}</div></div><span class="chevron">${active && !settingsOpen && !inspecting ? "⌄" : "›"}</span></div>${active && !settingsOpen && !inspecting ? `<div class="step-body">${n === 1 ? bodyImages() : n === 2 ? bodyTargets() : bodyProcess()}</div>` : ""}</div>`);
   }
+  const insp = inspect.images.length ? `${inspect.images.length} image${inspect.images.length !== 1 ? "s" : ""} open` : "view and measure any thermal image";
+  parts.push(`<div class="step ${inspecting ? "active" : ""}" data-step="inspect"><div class="step-header"><div class="badge">◎</div><div><div class="step-title">Inspect</div><div class="step-summary">${esc(insp)}</div></div><span class="chevron">${inspecting && !settingsOpen ? "⌄" : "›"}</span></div>${inspecting && !settingsOpen ? `<div class="step-body">${bodyInspect()}</div>` : ""}</div>`);
   const s = state?.settings;
   const summary = s ? `ROI inset ${s.roi_inset_px} px · emissivity ${s.emissivity.enabled ? "on" : "off"}${state?.survey.skip_existing ? " · skip existing outputs" : ""}${state && !state.survey.copy_metadata ? " · no metadata copy" : ""}` : "";
   parts.push(`<div class="step ${settingsOpen ? "active" : ""}" data-step="settings"><div class="step-header"><div class="badge">⚙</div><div><div class="step-title">Settings</div><div class="step-summary">${esc(summary)}</div></div><span class="chevron">${settingsOpen ? "⌄" : "›"}</span></div>${settingsOpen ? `<div class="step-body">${bodySettings()}</div>` : ""}</div>`);
@@ -208,7 +218,8 @@ function renderRail() {
       if (step === "settings") {
         settingsOpen = !settingsOpen;
         renderRail();
-      } else void showStep(Number(step) as Step);
+      } else if (step === "inspect") void toggleInspect();
+      else void showStep(Number(step) as Step);
     }),
   );
   wireRail();
@@ -267,6 +278,34 @@ function bodyProcess(): string {
 <div class="hint">Choosing a folder runs the pre-flight check and lists the images; then press Run.</div>`;
 }
 
+function currentInspectPolys(): { points: Point[]; stats: PolygonStats | null }[] {
+  const im = inspect.images[inspectCurrent];
+  if (!im) return [];
+  let list = inspectPolys.get(im.path);
+  if (!list) {
+    list = [];
+    inspectPolys.set(im.path, list);
+  }
+  return list;
+}
+
+function inspectTargets(): Target[] {
+  return currentInspectPolys().map((p, j) => ({ name: `P${j + 1}`, label: `P${j + 1}`, color: PALETTE[j % PALETTE.length], polygon: p.points, inner: [], mean: p.stats?.mean ?? null, std: p.stats?.std ?? null, pixels: p.stats?.count ?? 0, ground_truth: null, inset_applied: true, complete: false, warn_small: false }));
+}
+
+function bodyInspect(): string {
+  const imgs = inspect.images;
+  const g: Guide = !imgs.length
+    ? { head: "Open images… (for example the calibrated outputs) and move the mouse over the image to read values.", detail: "Any single-band image works; a folder opens every image in it. Nothing here is stored in the project." }
+    : { head: "Hover for the value under the cursor. Press Draw polygon and click the corners for the mean of an area.", detail: "Polygons belong to the image they are drawn on; the table on the right lists them. Save table… writes them as CSV." };
+  return `${guideHtml(g, "guide-inspect")}
+<div class="row" style="margin-top:8px"><button class="btn accent" id="btn-inspect-open">Open images…</button><button class="btn" id="btn-inspect-folder">Open folder…</button><button class="btn" id="btn-inspect-clear" ${imgs.length ? "" : "disabled"}>Clear</button></div>
+<div class="card listbox" id="inspect-list">${imgs.map((im, i) => `<div class="${i === inspectCurrent ? "selected" : ""}" data-i="${i}">${esc(im.name)}</div>`).join("")}</div>
+<div class="nav" style="margin-top:6px"><button class="btn small" id="btn-inspect-prev" ${imgs.length > 1 ? "" : "disabled"}>‹</button><span class="shot-label">${imgs.length ? `${inspectCurrent + 1} of ${imgs.length}` : "no image"}</span><button class="btn small" id="btn-inspect-next" ${imgs.length > 1 ? "" : "disabled"}>›</button><span class="spacer"></span><button class="btn small" id="btn-inspect-remove" ${imgs.length ? "" : "disabled"}>Remove</button></div>
+<div class="row" style="margin-top:8px"><button class="btn" id="btn-inspect-draw" ${imgs.length ? "" : "disabled"}>Draw polygon</button><button class="btn" id="btn-inspect-save" ${currentInspectPolys().length ? "" : "disabled"}>Save table…</button></div>
+<div class="hint">Wheel: zoom · right-drag: pan · a corner clicked again is removed · first corner or Enter closes · Esc cancels</div>`;
+}
+
 function bodySettings(): string {
   const s = state?.settings;
   const sv = state?.survey;
@@ -313,6 +352,15 @@ function wireRail() {
     }
   });
   on("#btn-add-target", "click", () => void addTargetAndDraw());
+  on("#btn-inspect-open", "click", () => void inspectAdd("files"));
+  on("#btn-inspect-folder", "click", () => void inspectAdd("folder"));
+  on("#btn-inspect-clear", "click", () => void inspectClear());
+  on("#inspect-list div", "click", (el) => void inspectSelect(Number(el.dataset.i)));
+  on("#btn-inspect-prev", "click", () => void inspectSelect((inspectCurrent - 1 + inspect.images.length) % inspect.images.length));
+  on("#btn-inspect-next", "click", () => void inspectSelect((inspectCurrent + 1) % inspect.images.length));
+  on("#btn-inspect-remove", "click", () => void inspectRemoveImage());
+  on("#btn-inspect-draw", "click", () => startInspectDrawing());
+  on("#btn-inspect-save", "click", () => void inspectSaveCsv());
   on("#btn-copy", "click", () => void update("copy_polygons", { source: current }));
   on("#btn-browse-survey", "click", () => void browseSurvey());
   on("#btn-browse-output", "click", () => void browseOutput());
@@ -405,10 +453,22 @@ function startDrawing(target: number) {
 /** The polygon is closed (first corner clicked again, or Enter): measure it and move on to the reading. */
 function finishDrawing() {
   if (!drawing || drawing.points.length < 3) return;
-  const { target, points } = drawing;
+  const { target, points, inspect: forInspect } = drawing;
   drawing = null;
   viewer.drawing = null;
   viewer.activeTarget = null;
+  if (forInspect) {
+    const list = currentInspectPolys();
+    const entry = { points, stats: null as PolygonStats | null };
+    list.splice(target, 0, entry);
+    renderAll();
+    void call<PolygonStats>("inspect_polygon_stats", { index: inspectCurrent, polygon: points }).then((st) => {
+      entry.stats = st;
+      renderAll();
+      status(st && st.mean !== null ? `P${list.indexOf(entry) + 1}: mean ${st.mean.toFixed(2)} ${unit()} over ${st.count} px.` : "No valid pixels in that polygon.");
+    });
+    return;
+  }
   void update("set_polygon", { event: current, target, polygon: points }).then(() => {
     const t = currentEvent()?.targets[target];
     status(t ? `${t.label}: mean ${t.mean?.toFixed(2)} ${unit()} over ${t.pixels} px.` : "Polygon set.");
@@ -433,6 +493,128 @@ async function addTargetAndDraw() {
   await update("add_target");
   const ev = currentEvent();
   if (ev) startDrawing(visibleTargets(ev).length - 1);
+}
+
+// ----------------------------------------------------------------------------- Inspect
+
+async function toggleInspect() {
+  if (inspecting) {
+    await showStep(activeStep);
+    return;
+  }
+  cancelDrawing(true);
+  inspecting = true;
+  settingsOpen = false;
+  await inspectSelect(inspectCurrent);
+}
+
+async function inspectSelect(i: number) {
+  cancelDrawing(true);
+  inspectCurrent = Math.max(0, Math.min(i, inspect.images.length - 1));
+  const im = inspect.images[inspectCurrent];
+  if (!im) {
+    viewer.placeholder = "No image open.\n\nOpen images… or Open folder… (left) to look at any thermal image.";
+    viewer.setImage(null);
+    renderAll();
+    return;
+  }
+  const key = "inspect:" + im.path;
+  let img = imageCache.get(key);
+  if (!img) {
+    img = (await call<ImagePayload>("inspect_image_data", { index: inspectCurrent })) ?? undefined;
+    if (!img) return;
+    imageCache.set(key, img);
+  }
+  viewer.setImage({ width: img.width, height: img.height, data: decodePixels(img), lo: img.lo, hi: img.hi });
+  renderAll();
+}
+
+async function inspectAddPaths(paths: string[]) {
+  const r = await call<InspectAddResult>("inspect_add", { paths });
+  if (!r) return;
+  const first = inspect.images.length === 0;
+  inspect = r.inspect;
+  if (r.rejected.length) await alert("Images skipped", `Only single-band images can be inspected:\n${r.rejected.join("\n")}`);
+  if (first && inspect.images.length) await inspectSelect(0);
+  else renderAll();
+  status(`${r.added} image(s) opened for inspection.`);
+}
+
+async function inspectAdd(kind: "files" | "folder") {
+  const paths = kind === "files" ? await pick("file", pickImages, [] as string[]) : [await pick("folder", () => pickFolder("Folder with images to inspect"), null)].filter((p): p is string => !!p);
+  if (paths.length) await inspectAddPaths(paths);
+}
+
+/** From the Process step's "Done" card: the output folder, opened in Inspect. */
+async function inspectResults() {
+  if (!state?.last_output) return;
+  if (!inspecting) await toggleInspect();
+  await inspectAddPaths([state.last_output]);
+}
+
+async function inspectRemoveImage() {
+  const im = inspect.images[inspectCurrent];
+  if (!im) return;
+  inspectPolys.delete(im.path);
+  imageCache.delete("inspect:" + im.path);
+  const r = await call<InspectDto>("inspect_remove", { index: inspectCurrent });
+  if (!r) return;
+  inspect = r;
+  await inspectSelect(inspectCurrent);
+}
+
+async function inspectClear() {
+  const r = await call<InspectDto>("inspect_clear");
+  if (!r) return;
+  inspect = r;
+  inspectPolys.clear();
+  for (const k of [...imageCache.keys()]) if (k.startsWith("inspect:")) imageCache.delete(k);
+  await inspectSelect(0);
+}
+
+function startInspectDrawing() {
+  if (!inspect.images.length) return;
+  drawing = { target: currentInspectPolys().length, points: [], redo: false, inspect: true };
+  viewer.drawing = drawing.points;
+  viewer.activeTarget = drawing.target;
+  (document.activeElement as HTMLElement | null)?.blur();
+  status("Click the corners of the area, then the first corner again (or Enter) to close; Esc cancels.");
+  renderAll();
+}
+
+function inspectRemovePoly(j: number) {
+  currentInspectPolys().splice(j, 1);
+  renderAll();
+}
+
+async function inspectSaveCsv() {
+  const lines = ["image,area,mean,std,min,max,pixels,corners"];
+  for (const im of inspect.images) {
+    (inspectPolys.get(im.path) ?? []).forEach((p, j) => {
+      const f = (v: number | null | undefined) => (v === null || v === undefined || !isFinite(v) ? "" : v.toFixed(4));
+      lines.push([im.name, `P${j + 1}`, f(p.stats?.mean), f(p.stats?.std), f(p.stats?.min), f(p.stats?.max), String(p.stats?.count ?? ""), `"${p.points.map(([x, y]) => `${x} ${y}`).join(";")}"`].join(","));
+    });
+  }
+  if (lines.length === 1) return;
+  const path = await pick("save", () => pickCsvToSave("inspect_table.csv"), null);
+  if (!path) return;
+  const written = await call<string>("write_text_file", { path, text: lines.join("\n") + "\n" });
+  if (written) status(`Table saved: ${written}`);
+}
+
+function renderInspectPanel() {
+  const el = $("#fit-panel");
+  const im = inspect.images[inspectCurrent];
+  const polys = currentInspectPolys();
+  const f = (v: number | null | undefined, d = 2) => (v === null || v === undefined || !isFinite(v) ? "–" : v.toFixed(d));
+  const rows = polys.map((p, j) => `<tr><td><span style="display:inline-block;width:10px;height:10px;background:${PALETTE[j % PALETTE.length]};vertical-align:middle;margin-right:5px"></span>P${j + 1}</td><td class="r">${f(p.stats?.mean)}</td><td class="r">${f(p.stats?.std)}</td><td class="r">${f(p.stats?.min, 1)}</td><td class="r">${f(p.stats?.max, 1)}</td><td class="r">${p.stats ? p.stats.count : "…"}</td><td><button class="btn small" data-inspect-remove="${j}">×</button></td></tr>`).join("");
+  el.innerHTML = `<div class="fit-head"><span class="t">Inspect</span><span class="muted small">${im ? esc(im.name) : "no image"}</span></div>
+<div class="hint" style="margin:8px 0">The value under the cursor follows the mouse on the image. Polygons drawn here are listed below (${esc(unit())}).</div>
+<div style="overflow:auto"><table class="res"><thead><tr><th>Area</th><th class="r">mean</th><th class="r">σ</th><th class="r">min</th><th class="r">max</th><th class="r">px</th><th></th></tr></thead><tbody>${rows || `<tr><td colspan="7" class="muted">no polygons on this image yet</td></tr>`}</tbody></table></div>
+<div class="fit-btns"><button class="btn" id="btn-inspect-save2" ${polys.length ? "" : "disabled"}>Save table as CSV…</button><button class="btn accent" id="btn-inspect-back">Back to the calibration ›</button></div>`;
+  el.querySelectorAll<HTMLElement>("[data-inspect-remove]").forEach((b) => b.addEventListener("click", () => inspectRemovePoly(Number(b.dataset.inspectRemove))));
+  el.querySelector("#btn-inspect-save2")?.addEventListener("click", () => void inspectSaveCsv());
+  el.querySelector("#btn-inspect-back")?.addEventListener("click", () => void showStep(activeStep));
 }
 
 async function undo() {
@@ -568,13 +750,20 @@ async function startBatch() {
 // ----------------------------------------------------------------------------- centre: image / process view
 
 function renderCenter() {
-  const process = activeStep === 3;
+  const process = activeStep === 3 && !inspecting;
   $("#image-view").hidden = process;
   $("#process-view").hidden = !process;
-  const ev = currentEvent();
-  $("#image-name").textContent = ev ? ev.file_name : "No image";
-  $("#image-info").textContent = ev && viewer.image ? `${viewer.image.width} × ${viewer.image.height} · ${ev.timestamp.replace("T", " ")}${ev.timestamp_tz} (${ev.timestamp_source})` : "";
-  viewer.targets = ev ? visibleTargets(ev) : [];
+  if (inspecting) {
+    const im = inspect.images[inspectCurrent];
+    $("#image-name").textContent = im ? im.name : "No image";
+    $("#image-info").textContent = im && viewer.image ? `${viewer.image.width} × ${viewer.image.height} · inspect` : "";
+    viewer.targets = inspectTargets();
+  } else {
+    const ev = currentEvent();
+    $("#image-name").textContent = ev ? ev.file_name : "No image";
+    $("#image-info").textContent = ev && viewer.image ? `${viewer.image.width} × ${viewer.image.height} · ${ev.timestamp.replace("T", " ")}${ev.timestamp_tz} (${ev.timestamp_source})` : "";
+    viewer.targets = ev ? visibleTargets(ev) : [];
+  }
   viewer.redraw();
   if (process) renderProcess();
 }
@@ -613,6 +802,10 @@ function renderProcess() {
 }
 
 function renderFit() {
+  if (inspecting) {
+    renderInspectPanel();
+    return;
+  }
   const ev = currentEvent();
   const n = state?.events.length ?? 0;
   const label = ev ? (n === 1 ? "only" : current === 0 ? "start" : current === n - 1 ? "end" : `mid ${current}`) : "";
@@ -668,8 +861,14 @@ async function showStep(n: Step) {
     }
   }
   const previous = activeStep;
+  const wasInspecting = inspecting;
+  inspecting = false;
   activeStep = n;
   settingsOpen = false;
+  if (wasInspecting) {
+    viewer.placeholder = CAL_PLACEHOLDER;
+    await selectShot(current);
+  }
   if (n === 3 && state?.survey.folder) void runPreflight();
   renderAll();
   if (n === 2 && previous !== 2) maybeAutoDraw();
@@ -887,6 +1086,10 @@ declare global {
       showStep: (n: Step) => Promise<void>;
       guidance: () => { images: Guide; targets: Guide; process: Guide };
       pickImages: () => Promise<string[]>;
+      inspecting: () => boolean;
+      inspect: () => InspectDto;
+      inspectPolys: () => { points: Point[]; stats: PolygonStats | null }[];
+      toggleInspect: () => Promise<void>;
     };
   }
 }
@@ -903,6 +1106,10 @@ window.__app = {
   showStep,
   guidance: () => ({ images: guideImages(), targets: guideTargets(), process: guideProcess() }),
   pickImages,
+  inspecting: () => inspecting,
+  inspect: () => inspect,
+  inspectPolys: currentInspectPolys,
+  toggleInspect,
 };
 
 // ----------------------------------------------------------------------------- start

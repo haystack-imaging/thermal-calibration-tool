@@ -28,6 +28,7 @@ let state = {
   cancel: false,
 };
 let counter = 0;
+const inspectImages: { name: string; path: string }[] = [];
 type Snapshot = { path: string; targets: MockShot["targets"]; fit: Fit | null }[];
 const undoStack: Snapshot[] = [];
 const redoStack: Snapshot[] = [];
@@ -361,6 +362,40 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
       return stateDto();
     case "open_in_file_manager":
       return null;
+    case "inspect_state":
+      return { images: inspectImages };
+    case "inspect_add": {
+      let added = 0;
+      for (const p of a.paths as string[]) {
+        const names = p.endsWith(".tif") ? [p] : Array.from({ length: 6 }, (_, j) => `${p}/survey_${j}_calibrated.tif`);
+        for (const n of names) if (!inspectImages.some((im) => im.path === n)) { inspectImages.push({ name: n.split("/").pop()!, path: n }); added++; }
+      }
+      return { added, rejected: [], inspect: { images: inspectImages } };
+    }
+    case "inspect_remove":
+      inspectImages.splice(a.index as number, 1);
+      return { images: inspectImages };
+    case "inspect_clear":
+      inspectImages.length = 0;
+      return { images: inspectImages };
+    case "inspect_image_data": {
+      const px = synthShot(7 + (a.index as number));
+      const bytes = new Uint8Array(px.buffer);
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      let lo = Infinity, hi = -Infinity;
+      for (const v of px) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      return { width: W, height: H, data_base64: btoa(bin), lo, hi };
+    }
+    case "inspect_polygon_stats": {
+      const px = synthShot(7 + (a.index as number));
+      const m = insideMask(a.polygon as Point[], 0);
+      const vals: number[] = [];
+      for (let i = 0; i < m.length; i++) if (m[i]) vals.push(px[i]);
+      if (!vals.length) return { mean: null, std: null, min: null, max: null, count: 0 };
+      const mean = vals.reduce((x, y) => x + y, 0) / vals.length;
+      return { mean, std: Math.sqrt(vals.reduce((x, v) => x + (v - mean) ** 2, 0) / vals.length), min: Math.min(...vals), max: Math.max(...vals), count: vals.length };
+    }
     case "undo": {
       const sn = undoStack.pop();
       if (sn) {

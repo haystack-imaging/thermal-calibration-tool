@@ -74,6 +74,8 @@ pub struct Inner {
     /// Undo history: the targets and fits of every shot before each change (newest last).
     undo: Vec<Vec<CalibrationEvent>>,
     redo: Vec<Vec<CalibrationEvent>>,
+    /// Images opened in the Inspect section; not part of the project.
+    inspect: Vec<PathBuf>,
 }
 
 pub struct AppState(pub Mutex<Inner>);
@@ -1172,6 +1174,12 @@ pub fn run() {
             write_text_file,
             undo,
             redo,
+            inspect_state,
+            inspect_add,
+            inspect_remove,
+            inspect_clear,
+            inspect_image_data,
+            inspect_polygon_stats,
             e2e_report,
             e2e_done,
         ])
@@ -1364,6 +1372,195 @@ fn redo(state: Shared) -> StateDto {
         inner.undo.push(now);
     }
     state_dto(&mut inner)
+}
+
+// ----------------------------------------------------------------------------- Inspect: any image, hover and polygons
+
+#[derive(Serialize)]
+pub struct InspectImage {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+pub struct InspectDto {
+    pub images: Vec<InspectImage>,
+}
+
+#[derive(Serialize)]
+pub struct InspectAddResult {
+    pub added: usize,
+    pub rejected: Vec<String>,
+    pub inspect: InspectDto,
+}
+
+/// Statistics of the finite pixels inside a polygon (no inset): a rough look, not a calibration target.
+#[derive(Serialize)]
+pub struct PolygonStats {
+    pub mean: f64,
+    pub std: f64,
+    pub min: f64,
+    pub max: f64,
+    pub count: usize,
+}
+
+fn inspect_dto(inner: &Inner) -> InspectDto {
+    InspectDto {
+        images: inner
+            .inspect
+            .iter()
+            .map(|p| InspectImage {
+                name: thermal_core::file_name(p),
+                path: p.to_string_lossy().to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn image_files_in(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| {
+                    p.is_file()
+                        && p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                            thermal_core::IMAGE_EXTENSIONS
+                                .contains(&e.to_ascii_lowercase().as_str())
+                        })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+fn image_payload(r: &Raster) -> ImageData {
+    let (lo, hi) = r
+        .finite_stats()
+        .map(|(_, lo, hi)| (lo, hi))
+        .unwrap_or((0.0, 1.0));
+    let mut bytes = Vec::with_capacity(r.data.len() * 4);
+    for v in &r.data {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    ImageData {
+        width: r.width,
+        height: r.height,
+        data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        lo,
+        hi,
+    }
+}
+
+#[tauri::command]
+fn inspect_state(state: Shared) -> InspectDto {
+    inspect_dto(&lock(&state))
+}
+
+/// Files or folders; a folder contributes every image file in it. Only single-band images are kept.
+#[tauri::command]
+fn inspect_add(paths: Vec<String>, state: Shared) -> Result<InspectAddResult, String> {
+    let mut inner = lock(&state);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for p in paths {
+        let path = PathBuf::from(&p);
+        if path.is_dir() {
+            candidates.extend(image_files_in(&path));
+        } else {
+            candidates.push(path);
+        }
+    }
+    let (mut added, mut rejected) = (0usize, Vec::new());
+    for path in candidates {
+        if inner.inspect.contains(&path) {
+            continue;
+        }
+        let info = inspect_image(&path);
+        if !info.error.is_empty() || !info.is_single_band() {
+            rejected.push(format!(
+                "{}: {}",
+                thermal_core::file_name(&path),
+                info.describe()
+            ));
+            continue;
+        }
+        inner.inspect.push(path);
+        added += 1;
+    }
+    Ok(InspectAddResult {
+        added,
+        rejected,
+        inspect: inspect_dto(&inner),
+    })
+}
+
+#[tauri::command]
+fn inspect_remove(index: usize, state: Shared) -> InspectDto {
+    let mut inner = lock(&state);
+    if index < inner.inspect.len() {
+        let p = inner.inspect.remove(index);
+        inner.cache.remove(&p);
+    }
+    inspect_dto(&inner)
+}
+
+#[tauri::command]
+fn inspect_clear(state: Shared) -> InspectDto {
+    let mut inner = lock(&state);
+    for p in std::mem::take(&mut inner.inspect) {
+        inner.cache.remove(&p);
+    }
+    inspect_dto(&inner)
+}
+
+#[tauri::command]
+fn inspect_image_data(index: usize, state: Shared) -> Result<ImageData, String> {
+    let mut inner = lock(&state);
+    let path = inner.inspect.get(index).cloned().ok_or("no such image")?;
+    let r = inner.raster(&path)?;
+    Ok(image_payload(&r))
+}
+
+#[tauri::command]
+fn inspect_polygon_stats(
+    index: usize,
+    polygon: Vec<[i32; 2]>,
+    state: Shared,
+) -> Result<PolygonStats, String> {
+    let mut inner = lock(&state);
+    let path = inner.inspect.get(index).cloned().ok_or("no such image")?;
+    let r = inner.raster(&path)?;
+    let pts: Vec<(i32, i32)> = polygon.iter().map(|p| (p[0], p[1])).collect();
+    let (mask, _) = polygon_mask(&pts, r.width, r.height, 0);
+    let vals: Vec<f64> = mask
+        .data
+        .iter()
+        .zip(r.data.iter())
+        .filter(|(m, v)| **m != 0 && v.is_finite())
+        .map(|(_, v)| *v as f64)
+        .collect();
+    if vals.is_empty() {
+        return Ok(PolygonStats {
+            mean: f64::NAN,
+            std: f64::NAN,
+            min: f64::NAN,
+            max: f64::NAN,
+            count: 0,
+        });
+    }
+    let n = vals.len() as f64;
+    let mean = vals.iter().sum::<f64>() / n;
+    let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+    let min = vals.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    Ok(PolygonStats {
+        mean,
+        std: var.sqrt(),
+        min,
+        max,
+        count: vals.len(),
+    })
 }
 
 // ----------------------------------------------------------------------------- end-to-end harness
