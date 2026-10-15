@@ -69,6 +69,16 @@ function alert(title: string, text: string, buttons: { label: string; accent?: b
   });
 }
 
+/** A native dialog that fails must say so instead of doing nothing. */
+async function pick<T>(what: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    await alert("Problem", `The ${what} dialog could not be opened: ${String(e instanceof Error ? e.message : e)}`);
+    return fallback;
+  }
+}
+
 async function call<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T | null> {
   try {
     return await invoke<T>(cmd, args);
@@ -325,7 +335,7 @@ function setSettings(patch: Partial<AppState["settings"]>) {
 }
 
 async function addImages() {
-  const paths = await pickImages();
+  const paths = await pick("file", pickImages, [] as string[]);
   if (!paths.length) return;
   const r = await call<AddResult>("add_calibration_images", { paths });
   if (!r) return;
@@ -428,13 +438,13 @@ async function setGroundTruth(i: number, text: string) {
 }
 
 async function browseSurvey() {
-  const f = await pickFolder("Select the survey folder (every image in it is processed)");
+  const f = await pick("folder", () => pickFolder("Select the survey folder (every image in it is processed)"), null);
   if (!f) return;
   await applySurvey({ folder: f, output_folder: state?.survey.output_folder || f + "/calibrated" });
 }
 
 async function browseOutput() {
-  const f = await pickFolder("Select the output folder");
+  const f = await pick("folder", () => pickFolder("Select the output folder"), null);
   if (f) await applySurvey({ output_folder: f });
 }
 
@@ -479,10 +489,7 @@ async function startBatch() {
   pending = pf.files;
   progressPct = 0;
   progressText = "Starting…";
-  const ok = await call<null>("start_batch");
-  if (ok === null && !state.running) {
-    // the command returned an error (shown already) or succeeded; refresh either way
-  }
+  await call<boolean>("start_batch"); // an error is shown by call(); either way refresh
   await update("get_state");
 }
 
@@ -550,10 +557,10 @@ async function exportReport() {
   if (!ev?.fit) return;
   const html = await call<string>("fit_report_html", { index: current });
   if (!html) return;
-  const path = await pickReportToSave(ev.file_name.replace(/\.[^.]+$/, "") + "_fit_report.html");
+  const path = await pick("save", () => pickReportToSave(ev.file_name.replace(/\.[^.]+$/, "") + "_fit_report.html"), null);
   if (!path) return;
-  const ok = await call<null>("write_text_file", { path, text: html });
-  if (ok !== null || !state) status(`Fit report written: ${path}`);
+  const written = await call<string>("write_text_file", { path, text: html });
+  if (written) status(`Fit report written: ${written}`);
 }
 
 function showDetailedPlot() {
@@ -648,7 +655,7 @@ $("#btn-new").addEventListener("click", async () => {
   status("New project.");
 });
 $("#btn-open").addEventListener("click", async () => {
-  const p = await pickProjectToOpen();
+  const p = await pick("open", pickProjectToOpen, null);
   if (!p) return;
   imageCache.clear();
   const r = await call<{ problems: string[]; state: AppState }>("open_project", { path: p });
@@ -668,7 +675,7 @@ async function save(as: boolean) {
   let path: string | null = as ? null : state.project_path;
   if (!path) {
     const suggested = await invoke<string>("suggested_project_filename");
-    path = await pickProjectToSave(suggested);
+    path = await pick("save", () => pickProjectToSave(suggested), null);
   }
   if (!path) return;
   const saved = await call<string>("save_project", { path });
@@ -714,6 +721,40 @@ void listen("batch-done", (p) => {
   status(d.error ? "Batch processing failed." : d.cancelled ? `Batch cancelled: ${d.ok} image(s) written to ${d.output}; the rest is not processed.` : `Batch complete: ${d.ok} image(s), the log and the project file written to ${d.output}`);
   void update("get_state");
 });
+
+// ----------------------------------------------------------------------------- test access
+
+declare global {
+  interface Window {
+    __app?: {
+      state: () => AppState | null;
+      current: () => number;
+      activeStep: () => number;
+      drawing: () => boolean;
+      preflight: () => Preflight | null;
+      rows: () => Row[];
+      viewer: Viewer;
+      selectShot: (i: number) => Promise<void>;
+      showStep: (n: Step) => void;
+      guidance: () => { images: Guide; targets: Guide; process: Guide };
+      pickImages: () => Promise<string[]>;
+    };
+  }
+}
+
+window.__app = {
+  state: () => state,
+  current: () => current,
+  activeStep: () => activeStep,
+  drawing: () => drawing !== null,
+  preflight: () => preflight,
+  rows: () => rows,
+  viewer,
+  selectShot,
+  showStep,
+  guidance: () => ({ images: guideImages(), targets: guideTargets(), process: guideProcess() }),
+  pickImages,
+};
 
 // ----------------------------------------------------------------------------- start
 

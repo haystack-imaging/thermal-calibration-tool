@@ -7,8 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - `rust/`: a port of the engine to Rust (`thermal-core`, validated against the golden flight), a headless
-  CLI (`thermal-calibration`) and the beginnings of a Tauri desktop app with a web front-end. The Python
-  tool remains the release until the app is complete.
+  CLI (`thermal-calibration`) and a Tauri desktop app with a web front-end, with its own test suite
+  (engine, front-end, shell state, end-to-end inside the real app) and CI. The Python tool remains the
+  release until the app is complete.
 
 ## [0.2.0] - 2026-10-12
 

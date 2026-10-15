@@ -1,0 +1,78 @@
+name: rust
+
+on:
+  push:
+    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", ".github/workflows/rust.yml"]
+  pull_request:
+    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", ".github/workflows/rust.yml"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  engine:
+    name: engine and CLI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Golden flight (built by the Python tool, the reference)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[exif,test]"
+          python rust/tools/make_golden_flight.py
+      - name: Format and lint
+        working-directory: rust
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests (unit + golden comparison with the Python reference)
+        working-directory: rust
+        run: cargo test --workspace
+      - name: CLI on the golden flight
+        working-directory: rust
+        run: cargo run -p thermal-cli -- --project ../tests/data/golden_flight/flight.calib.json --output ${{ runner.temp }}/golden_out
+
+  app:
+    name: desktop app (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System packages (WebKitGTK, GTK, a virtual display)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xvfb
+      - name: Golden flight
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[exif,test]"
+          python rust/tools/make_golden_flight.py
+      - name: Front-end: type check, unit tests, bundle
+        working-directory: rust/app
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Shell: lint, state tests, end-to-end flow on a virtual display
+        working-directory: rust/app/src-tauri
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          xvfb-run -a -s "-screen 0 1600x1000x24" cargo test -- --nocapture
