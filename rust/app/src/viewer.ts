@@ -81,6 +81,15 @@ export function clahe(g: Uint8Array, w: number, h: number, valid: Uint8Array, ti
   return out;
 }
 
+const SCENE_URL = new URL("./assets/scene-flight.png", import.meta.url).href;
+/** Text on the image canvas, which stays dark in both themes. */
+const CANVAS_TEXT = "#A8B0A6";
+
+function themeColor(name: string, fallback: string): string {
+  const v = typeof getComputedStyle === "function" ? getComputedStyle(document.documentElement).getPropertyValue(name).trim() : "";
+  return v || fallback;
+}
+
 export class Viewer {
   readonly canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -298,14 +307,28 @@ export class Viewer {
     this.redraw();
   }
 
+  /** The empty-canvas scene (a drone over three calibration panels), drawn with the Haystack pixel kit. */
+  private scene: HTMLImageElement | null = null;
+
   redraw() {
     const ctx = this.ctx;
     const [W, H] = this.size();
-    ctx.fillStyle = "#202521";
+    ctx.fillStyle = themeColor("--canvas", "#121A16");
     ctx.fillRect(0, 0, W, H);
     this.onViewChange(this.scale);
     if (!this.image) {
-      ctx.fillStyle = "#9aa39d";
+      if (!this.scene) {
+        this.scene = new Image();
+        this.scene.onload = () => this.redraw();
+        this.scene.src = SCENE_URL;
+      }
+      if (this.scene.complete && this.scene.naturalWidth) {
+        const k = Math.max(2, Math.min(4, Math.floor(Math.min(W / 240, H / 180))));
+        const sw = this.scene.naturalWidth * k, sh = this.scene.naturalHeight * k;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(this.scene, Math.round(W / 2 - sw / 2), Math.round(H / 2 - 34 - sh), sw, sh);
+      }
+      ctx.fillStyle = CANVAS_TEXT;
       ctx.font = "13px system-ui, sans-serif";
       ctx.textAlign = "center";
       this.placeholder.split("\n").forEach((line, i) => ctx.fillText(line, W / 2, H / 2 - 10 + i * 18));

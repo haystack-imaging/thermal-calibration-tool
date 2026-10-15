@@ -1292,7 +1292,7 @@ th{{background:#f3f4f1;font-weight:600}}td:first-child,th:first-child{{text-alig
 img{{max-width:100%;border:1px solid #d9dcd6;margin-top:8px}}</style></head><body>
 <h1>Calibration fit report</h1>
 <p class='muted'>{esc(os.path.basename(event.image_path))} · captured {event.timestamp:%Y-%m-%d %H:%M:%S}{esc(event.timestamp_tz)}
-({esc(event.timestamp_source)}) · generated {datetime.now():%Y-%m-%d %H:%M} by {TOOL_NAME} {__version__}</p>
+({esc(event.timestamp_source)}) · generated {datetime.now():%Y-%m-%d %H:%M} by {TOOL_NAME} {__version__} · Haystack Imaging</p>
 <h2>Targets</h2>
 <table><tr><th>Target</th><th>Sensor mean ({esc(unit)})</th><th>σ</th><th>pixels</th><th>Reference ({esc(unit)})</th>{fitted_head}<th>Residual</th></tr>{''.join(rows)}</table>
 <h2>Coefficients</h2>{coeff}<h2>Diagnostics</h2>{diag}{img}
@@ -2539,7 +2539,7 @@ class ThermalCalibrationApp:
         hm.add_command(label="How to use", command=self._show_help)
         hm.add_command(label="About", command=lambda: messagebox.showinfo(
             "About", f"{TOOL_NAME} {__version__}\nEmpirical Line Method calibration for drone thermal and "
-                     "single-band multispectral images.\nGPL-3.0 · Moritz Nelle"))
+                     "single-band multispectral images.\nHaystack Imaging · haystackimaging.eu\nGPL-3.0 · Moritz Nelle"))
         menubar.add_cascade(label="Help", menu=hm)
         self.root.config(menu=menubar)
 

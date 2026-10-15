@@ -23,8 +23,8 @@ describe("renderTimeline", () => {
     expect(plot.querySelectorAll("polygon").length).toBe(2);
     const ticks = [...plot.querySelectorAll("rect")];
     expect(ticks.length).toBe(3);
-    expect(ticks.filter((r) => r.getAttribute("fill") === "#d7a98a").length).toBe(1);
-    expect(plot.querySelector("polyline")?.getAttribute("stroke")).toBe("#c0652a");
+    expect(ticks.filter((r) => r.getAttribute("class") === "c-tick-out").length).toBe(1);
+    expect(plot.querySelector("polyline")?.getAttribute("class")).toBe("c-drift");
     expect(plot.textContent).toContain("3 images · 10:01 to 10:20 · 0 before / 1 after the window");
     expect(plot.textContent).toContain("10:00:00 · b = -1.40");
   });

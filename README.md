@@ -1,6 +1,6 @@
 # Thermal Image Calibration Tool
 
-[![tests](https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/actions/workflows/tests.yml/badge.svg)](https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/actions/workflows/tests.yml)
+[![tests](https://github.com/haystack-imaging/thermal-calibration-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/haystack-imaging/thermal-calibration-tool/actions/workflows/tests.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
 A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
@@ -248,19 +248,19 @@ folder is the release.
 
 ## Reporting problems and contributing
 
-Please use the [issue tracker](https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, which is what makes a report actionable. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.
+Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calibration-tool/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, which is what makes a report actionable. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.
 
 ## How to cite
 
 If the tool contributes to a publication, please cite it. `CITATION.cff` holds the metadata (GitHub shows a "Cite this repository" button from it):
 
-> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.2.0) [Software]. https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets
+> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.2.0) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
 A versioned DOI (Zenodo) will be added once the repository is archived there.
 
 ## Author, acknowledgements and license
 
-Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle).
+Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle). Questions and problems go to the issue tracker; the company can be reached through its website.
 
 
 GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK, needed to convert R-JPEGs, is DJI's and is not part of this repository.

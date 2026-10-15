@@ -8,7 +8,7 @@ exclude = ["app/src-tauri"]
 version = "0.3.0-dev"
 edition = "2021"
 license = "GPL-3.0-only"
-repository = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
+repository = "https://github.com/haystack-imaging/thermal-calibration-tool"
 
 [profile.release]
 lto = "thin"

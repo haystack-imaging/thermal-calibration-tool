@@ -41,10 +41,10 @@ test = ["pytest>=7", "pytest-timeout>=2"]
 thermal-calibration-tool = "thermal_calibration_tool:main"
 
 [project.urls]
-Homepage = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
-Repository = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
-Issues = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/issues"
-Changelog = "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/haystack-imaging/thermal-calibration-tool"
+Repository = "https://github.com/haystack-imaging/thermal-calibration-tool"
+Issues = "https://github.com/haystack-imaging/thermal-calibration-tool/issues"
+Changelog = "https://github.com/haystack-imaging/thermal-calibration-tool/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 py-modules = ["thermal_calibration_tool"]

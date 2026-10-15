@@ -26,7 +26,7 @@ describe("plotSvg", () => {
     const other = { label: "shot 2 · 10:07", fit: { ...threeFit, intercept: -1.5 } };
     const svg = plotSvg(event(threeFit), [other], "°C", 290, 190);
     expect(svg).toContain('stroke-dasharray="4 3"');
-    expect((svg.match(/fill="none"/g) ?? []).length).toBe(3);
+    expect((svg.match(/class="c-other"/g) ?? []).length).toBe(4); // the dashed line and three hollow points
     expect(svg).toContain("dashed: shot 2 · 10:07");
   });
   it("says so with two targets instead of a band", () => {

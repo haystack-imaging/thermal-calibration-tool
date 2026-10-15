@@ -11,6 +11,11 @@ All notable changes to this project are documented here. The format follows
   (engine, front-end, shell state, end-to-end inside the real app) and CI. The Python tool remains the
   release until the app is complete.
 
+### Changed
+- Published by Haystack Imaging: the repository moved to `github.com/haystack-imaging/thermal-calibration-tool`
+  (the old address redirects), credits and citation updated, and the desktop app carries the company's
+  identity (palette, logo, pixel wordmark, a dark theme that follows the system).
+
 ## [0.2.0] - 2026-10-12
 
 A review of the March release found several defects that produced wrong numbers silently. All of them

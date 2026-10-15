@@ -29,39 +29,39 @@ export function plotSvg(ev: CalEvent, others: { label: string; fit: Fit }[], uni
   const px = (v: number) => L + ((v - xmin) / (xmax - xmin)) * (width - L - R);
   const py = (v: number) => height - B - ((v - ymin) / (ymax - ymin)) * (height - T - B);
   const parts: string[] = [];
-  parts.push(`<line x1="${L}" y1="${T}" x2="${L}" y2="${height - B}" stroke="#d9dcd6"/>`);
-  parts.push(`<line x1="${L}" y1="${height - B}" x2="${width - R}" y2="${height - B}" stroke="#d9dcd6"/>`);
+  parts.push(`<line x1="${L}" y1="${T}" x2="${L}" y2="${height - B}" class="c-axis"/>`);
+  parts.push(`<line x1="${L}" y1="${height - B}" x2="${width - R}" y2="${height - B}" class="c-axis"/>`);
   for (const o of others) {
-    parts.push(`<line x1="${px(xmin)}" y1="${py(o.fit.slope * xmin + o.fit.intercept)}" x2="${px(xmax)}" y2="${py(o.fit.slope * xmax + o.fit.intercept)}" stroke="#9aa39d" stroke-dasharray="4 3"/>`);
-    o.fit.x_values.forEach((x, i) => parts.push(`<circle cx="${px(x)}" cy="${py(o.fit.y_values[i])}" r="3" fill="none" stroke="#9aa39d"/>`));
+    parts.push(`<line x1="${px(xmin)}" y1="${py(o.fit.slope * xmin + o.fit.intercept)}" x2="${px(xmax)}" y2="${py(o.fit.slope * xmax + o.fit.intercept)}" class="c-other" stroke-dasharray="4 3"/>`);
+    o.fit.x_values.forEach((x, i) => parts.push(`<circle cx="${px(x)}" cy="${py(o.fit.y_values[i])}" r="3" class="c-other"/>`));
   }
   if (fit.resid_std !== null) {
     const upper = xs.map((x, i) => `${px(x)},${py(fit.slope * x + fit.intercept + band[i])}`);
     const lower = xs.map((x, i) => `${px(x)},${py(fit.slope * x + fit.intercept - band[i])}`).reverse();
-    parts.push(`<polygon points="${[...upper, ...lower].join(" ")}" fill="#d9dcd6" opacity="0.6"/>`);
+    parts.push(`<polygon points="${[...upper, ...lower].join(" ")}" class="c-band" opacity="0.6"/>`);
   }
-  parts.push(`<line x1="${px(xmin)}" y1="${py(fit.slope * xmin + fit.intercept)}" x2="${px(xmax)}" y2="${py(fit.slope * xmax + fit.intercept)}" stroke="#1d2320" stroke-width="2"/>`);
+  parts.push(`<line x1="${px(xmin)}" y1="${py(fit.slope * xmin + fit.intercept)}" x2="${px(xmax)}" y2="${py(fit.slope * xmax + fit.intercept)}" class="c-fit" stroke-width="2"/>`);
   const complete = ev.targets.filter((t) => t.complete);
   fit.x_values.forEach((x, i) => {
     const color = complete[i]?.color ?? "#999";
-    parts.push(`<circle cx="${px(x)}" cy="${py(fit.y_values[i])}" r="6" fill="${color}" stroke="#1d2320" stroke-width="1.5"/>`);
+    parts.push(`<circle cx="${px(x)}" cy="${py(fit.y_values[i])}" r="6" fill="${color}" class="c-point" stroke-width="1.5"/>`);
   });
   const eq = `y = ${fit.slope.toFixed(4)} x ${fit.intercept >= 0 ? "+" : "−"} ${Math.abs(fit.intercept).toFixed(2)}`;
   const eq2 = fit.rmse !== null ? `RMSE ${fit.rmse.toFixed(2)} ${unit}` : "2 targets: R² = 1 by construction";
   const top = fit.slope >= 0;
   const ey = top ? T + 4 : height - B - 22;
-  parts.push(`<rect x="${L + 3}" y="${ey - 2}" width="${Math.max(eq.length, eq2.length) * 6.6 + 8}" height="30" fill="#fbfbf9"/>`);
-  parts.push(`<text x="${L + 6}" y="${ey + 10}" font-family="ui-monospace, monospace" font-size="11" fill="#1d2320">${esc(eq)}</text>`);
-  parts.push(`<text x="${L + 6}" y="${ey + 24}" font-family="ui-monospace, monospace" font-size="11" fill="#1d2320">${esc(eq2)}</text>`);
+  parts.push(`<rect x="${L + 3}" y="${ey - 2}" width="${Math.max(eq.length, eq2.length) * 6.6 + 8}" height="30" class="c-box"/>`);
+  parts.push(`<text x="${L + 6}" y="${ey + 10}" font-family="ui-monospace, monospace" font-size="11" class="c-text">${esc(eq)}</text>`);
+  parts.push(`<text x="${L + 6}" y="${ey + 24}" font-family="ui-monospace, monospace" font-size="11" class="c-text">${esc(eq2)}</text>`);
   if (others.length) {
     const names = others.length <= 2 ? others.map((o) => o.label).join(", ") : `${others.length} other shots`;
     const ly = top ? height - B - 6 : T + 12;
-    parts.push(`<text x="${width - R - 4}" y="${ly}" text-anchor="end" font-size="10" fill="#7a827d">dashed: ${esc(names)}</text>`);
+    parts.push(`<text x="${width - R - 4}" y="${ly}" text-anchor="end" font-size="10" class="c-muted">dashed: ${esc(names)}</text>`);
   }
-  parts.push(`<text x="${(L + width - R) / 2}" y="${height - 4}" text-anchor="middle" font-size="10" fill="#7a827d">measured ${esc(unit)}</text>`);
-  parts.push(`<text x="10" y="${T + 4}" font-size="10" fill="#7a827d" transform="rotate(-90 10 ${T + 4})" text-anchor="end">reference ${esc(unit)}</text>`);
-  parts.push(`<text x="${L + 2}" y="${height - B + 12}" font-size="10" fill="#7a827d">${xmin.toFixed(0)}</text>`);
-  parts.push(`<text x="${width - R}" y="${height - B + 12}" font-size="10" fill="#7a827d" text-anchor="end">${xmax.toFixed(0)}</text>`);
+  parts.push(`<text x="${(L + width - R) / 2}" y="${height - 4}" text-anchor="middle" font-size="10" class="c-muted">measured ${esc(unit)}</text>`);
+  parts.push(`<text x="10" y="${T + 4}" font-size="10" class="c-muted" transform="rotate(-90 10 ${T + 4})" text-anchor="end">reference ${esc(unit)}</text>`);
+  parts.push(`<text x="${L + 2}" y="${height - B + 12}" font-size="10" class="c-muted">${xmin.toFixed(0)}</text>`);
+  parts.push(`<text x="${width - R}" y="${height - B + 12}" font-size="10" class="c-muted" text-anchor="end">${xmax.toFixed(0)}</text>`);
   return `<svg class="fit-plot" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${parts.join("")}</svg>`;
 }
 
@@ -70,7 +70,7 @@ export function renderFitPanel(el: HTMLElement, ev: CalEvent | null, subtitle: s
   const parts: string[] = [`<div class="fit-head"><span class="t">Fit</span><span class="muted small">${esc(subtitle)}</span></div>`];
   if (!ev || !fit || fit.single_point) {
     const text = !ev ? message : !fit ? "Need at least 2 complete targets" : "single point: K = ρ / DN";
-    parts.push(`<div class="fit-plot" style="display:flex;align-items:center;justify-content:center;color:#7a827d;font-size:12px;text-align:center;padding:0 16px">${esc(text)}</div>`);
+    parts.push(`<div class="fit-plot" style="display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center;padding:0 16px">${esc(text)}</div>`);
   } else {
     parts.push(plotSvg(ev, others, unit, 290, 190));
   }

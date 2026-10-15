@@ -7,8 +7,10 @@ date-released: 2026-10-10
 authors:
   - family-names: Nelle
     given-names: Moritz
+    affiliation: Haystack Imaging
 license: GPL-3.0-only
-repository-code: "https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets"
+repository-code: "https://github.com/haystack-imaging/thermal-calibration-tool"
+url: "https://haystackimaging.eu"
 keywords:
   - thermal imaging
   - UAV

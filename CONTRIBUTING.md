@@ -12,8 +12,8 @@ images.
 ## Development setup
 
 ```bash
-git clone https://github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets
-cd GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets
+git clone https://github.com/haystack-imaging/thermal-calibration-tool
+cd thermal-calibration-tool
 pip install -e ".[exif,test]"
 python -m pytest tests -q
 ```

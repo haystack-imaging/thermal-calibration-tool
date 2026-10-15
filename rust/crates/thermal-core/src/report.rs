@@ -239,7 +239,7 @@ th{{background:#f3f4f1;font-weight:600}}td:first-child,th:first-child{{text-alig
 .sw{{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:middle}}
 svg{{max-width:100%;height:auto;border:1px solid #d9dcd6;margin-top:8px}}</style></head><body>
 <h1>Calibration fit report</h1>
-<p class='muted'>{file} · captured {captured}{tz} ({source}) · generated {now} by {tool} {version}</p>
+<p class='muted'>{file} · captured {captured}{tz} ({source}) · generated {now} by {tool} {version} · Haystack Imaging</p>
 <h2>Targets</h2>
 <table><tr><th>Target</th><th>Sensor mean ({unit})</th><th>σ</th><th>pixels</th><th>Reference ({unit})</th>{fitted_head}<th>Residual</th></tr>{rows}</table>
 <h2>Coefficients</h2>{coeff}<h2>Diagnostics</h2>{diag}{plot}
