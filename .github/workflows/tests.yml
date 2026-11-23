@@ -22,7 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[exif,test]"
       - name: Unit, I/O and science tests
-        run: python -m pytest tests/test_science.py tests/test_io.py -q
+        run: python -m pytest tests/test_science.py tests/test_io.py tests/test_demo.py -q
       - name: GUI tests on a virtual display
         run: xvfb-run -a -s "-screen 0 1600x1000x24" python -m pytest tests/test_core.py tests/test_gui.py -q
 

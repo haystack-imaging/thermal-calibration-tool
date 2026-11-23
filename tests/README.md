@@ -70,10 +70,14 @@ sub-libraries by bare name, so the wrapper re-executes Python with the SDK direc
 ## Screenshots
 
 ```bash
-python tests/screenshot_gui.py               # → GUI_screenshots/
+python demo/make_demo_flight.py demo/flight                                  # relative paths, as in the README
+python tests/screenshot_gui.py --config demo/flight/screenshot_config.json   # → GUI_screenshots/
+python tests/screenshot_gui.py                                               # the test flight instead
 ```
 
-Opens the real window on the current display, loads the synthetic flight, draws the panels through the click
+The README screenshots come from the demo flight (`demo/make_demo_flight.py`). Its panel corners are known
+exactly, so no polygon is drawn by hand. The driver opens the real window on the current display, loads the
+flight, draws the panels through the click
 handler (the first one through real Tk mouse events), zooms with wheel events, scans the survey images for
 the timeline, runs the pre-flight check and the batch, and captures each state with ImageMagick's `import`.
 Needs Linux/X11 or XWayland.

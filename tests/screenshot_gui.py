@@ -14,7 +14,7 @@ Config file (JSON):
     {"title": "...", "calibration": [{"file": "...tif", "panels": {"black": [[x,y],...4 corners], ...},
                                        "gun": {"black": 45.6, ...}}, ...],
      "survey_folder": "...", "output_folder": "...", "zoom": {"at": [x, y], "notches": 1} or
-     "view": {"scale": 1.6, "center": [x, y]}, "loupe_target": 2}
+     "view": {"scale": 1.6, "center": [x, y]}, "loupe_target": 2, "hover": [x, y]}
 Needs `import` (ImageMagick) on PATH.
 """
 import argparse
@@ -116,7 +116,11 @@ def main():
         for _ in range(int(cfg.get("zoom", {}).get("notches", 1))):
             cv.event_generate('<Button-4>', x=int(cx), y=int(cy))
     settle(root, 3)
-    cv.event_generate('<Motion>', x=int(cx) + 40, y=int(cy) + 30)
+    if "hover" in cfg:                         # image point for the cursor readout
+        hx, hy = app.view.to_canvas(*cfg["hover"])
+        cv.event_generate('<Motion>', x=int(hx), y=int(hy))
+    else:
+        cv.event_generate('<Motion>', x=int(cx) + 40, y=int(cy) + 30)
     shoot(root, "GUI_Home.png")
 
     # --- drawing in progress with the loupe (two corners of one panel of the first shot)

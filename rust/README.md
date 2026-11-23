@@ -3,6 +3,10 @@
 A port of the Thermal Calibration Tool to Rust, with a Tauri desktop shell. The Python tool in the
 repository root stays the reference release until this one is complete.
 
+![The desktop app with the demo flight open](../GUI_screenshots/App_Targets.png)
+
+*The Targets step on the demo flight (`python demo/make_demo_flight.py`, then `--project demo/flight/demo.calib.json`).*
+
 ```
 rust/
 ├── crates/thermal-core/   the engine: timestamps, raster I/O, ROI, fits, interpolation, batch, project files, report

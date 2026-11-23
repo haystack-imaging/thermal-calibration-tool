@@ -8,6 +8,7 @@ dist/
 # generated / downloaded test data (see tests/README.md)
 tests/data/
 tests/vendor/
+demo/flight/
 
 # Rust / Tauri rewrite (rust/)
 rust/target/
