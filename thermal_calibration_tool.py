@@ -1325,7 +1325,7 @@ def events_from_project(project: dict, project_dir: Optional[str], roi_inset_px:
         path = d.get("path", "")
         if not os.path.exists(path) and project_dir:
             rel = (d.get("path_relative") or "").replace("\\", "/")     # projects saved on Windows used backslashes
-            for alt in ([os.path.join(project_dir, rel)] if rel else []) + \
+            for alt in ([os.path.normpath(os.path.join(project_dir, rel))] if rel else []) + \
                        [os.path.join(project_dir, os.path.basename(path))]:
                 if os.path.exists(alt):
                     path = alt

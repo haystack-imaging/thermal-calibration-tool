@@ -76,8 +76,15 @@ pub fn events_from_project(
             if let Some(dir) = project_dir {
                 let mut alts = Vec::new();
                 if let Some(rel) = d.get("path_relative").and_then(Value::as_str) {
-                    // older projects saved on Windows have backslashes
-                    alts.push(dir.join(rel.replace('\\', "/")));
+                    // "/" from any system, "\\" from older projects saved on Windows
+                    let mut alt = dir.to_path_buf();
+                    for part in rel
+                        .split(['/', '\\'])
+                        .filter(|p| !p.is_empty() && *p != ".")
+                    {
+                        alt.push(part);
+                    }
+                    alts.push(alt);
                 }
                 if let Some(name) = path.file_name() {
                     alts.push(dir.join(name));
