@@ -65,13 +65,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[exif,test]"
           python rust/tools/make_golden_flight.py
-      - name: Front-end: type check, unit tests, bundle
+      - name: "Front-end: type check, unit tests, bundle"
         working-directory: rust/app
         run: |
           npm ci
           npm test
           npm run build
-      - name: Shell: lint, state tests, end-to-end flow on a virtual display
+      - name: "Shell: lint, state tests, end-to-end flow on a virtual display"
         working-directory: rust/app/src-tauri
         run: |
           cargo clippy --all-targets -- -D warnings
