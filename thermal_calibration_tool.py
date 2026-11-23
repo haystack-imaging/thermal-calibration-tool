@@ -31,6 +31,7 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import traceback
 from dataclasses import dataclass, field
@@ -269,7 +270,8 @@ class CalibrationEvent:
              "targets": [t.to_dict() for t in self.targets]}
         if project_dir:
             try:
-                d["path_relative"] = os.path.relpath(os.path.abspath(self.image_path), project_dir)
+                # always "/", so a project saved on Windows opens on other systems too
+                d["path_relative"] = os.path.relpath(os.path.abspath(self.image_path), project_dir).replace(os.sep, "/")
             except ValueError:          # different drive on Windows
                 pass
         if self.fit is not None:        # a record of what was fitted, for the reader; recomputed on load
@@ -1322,7 +1324,8 @@ def events_from_project(project: dict, project_dir: Optional[str], roi_inset_px:
     for d in project.get("calibration_images", []):
         path = d.get("path", "")
         if not os.path.exists(path) and project_dir:
-            for alt in ([os.path.join(project_dir, d["path_relative"])] if d.get("path_relative") else []) + \
+            rel = (d.get("path_relative") or "").replace("\\", "/")     # projects saved on Windows used backslashes
+            for alt in ([os.path.join(project_dir, rel)] if rel else []) + \
                        [os.path.join(project_dir, os.path.basename(path))]:
                 if os.path.exists(alt):
                     path = alt
@@ -4090,6 +4093,9 @@ def main(argv: Optional[List[str]] = None):
             ap.error("--run needs --project")
         if not os.path.exists(args.project):
             ap.error(f"project file not found: {args.project}")
+        for stream in (sys.stdout, sys.stderr):           # a redirected Windows console is cp1252: no ✓
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(errors="replace")
         run_project_headless(args.project, args.survey, args.output, args.filter)
         return
     if platform.system() == "Windows":

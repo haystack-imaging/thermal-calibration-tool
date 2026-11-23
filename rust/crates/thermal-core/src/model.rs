@@ -400,8 +400,8 @@ pub fn isoformat(dt: NaiveDateTime) -> String {
     }
 }
 
-/// `os.path.relpath(path, base)` without touching the file system; None when the two have no common
-/// root (another drive on Windows).
+/// `os.path.relpath(path, base)` without touching the file system, always with `/` so a project saved
+/// on Windows opens elsewhere too; None when the two have no common root (another drive on Windows).
 pub fn relative_path(path: &Path, base: &Path) -> Option<String> {
     use std::path::Component;
     let path = std::path::absolute(path).ok()?;
@@ -412,15 +412,17 @@ pub fn relative_path(path: &Path, base: &Path) -> Option<String> {
         return None; // different prefix / drive
     }
     let common = p.iter().zip(b.iter()).take_while(|(a, c)| a == c).count();
-    let mut out = PathBuf::new();
-    for _ in common..b.len() {
-        out.push("..");
-    }
-    for c in &p[common..] {
-        out.push(c.as_os_str());
-    }
-    let s = out.to_string_lossy().to_string();
-    Some(if s.is_empty() { ".".to_string() } else { s })
+    let mut parts: Vec<String> = vec!["..".to_string(); b.len() - common];
+    parts.extend(
+        p[common..]
+            .iter()
+            .map(|c| c.as_os_str().to_string_lossy().to_string()),
+    );
+    Some(if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    })
 }
 
 #[cfg(test)]

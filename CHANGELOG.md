@@ -21,6 +21,12 @@ All notable changes to this project are documented here. The format follows
   cannot be updated with `git pull`; clone again. Credits and citation are updated, and the desktop app
   has the company's look (palette, logo, pixel wordmark, a dark theme that follows the system).
 
+### Fixed
+- On Windows a headless run (`--project … --run`) stopped with an encoding error when its output went to a
+  file or a pipe, because that output cannot hold the ✓ of the pre-flight list. It now prints `?` instead.
+- Project files keep the relative image paths with `/` on every system, so a project saved on Windows opens
+  on Linux and macOS. Older projects with `\` still open.
+
 ## [0.2.0] - 2026-10-12
 
 A review of the March release found several defects that produced wrong numbers silently. All of them

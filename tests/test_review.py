@@ -230,7 +230,7 @@ def test_project_resolves_relative_paths_after_the_folder_moved(tmp_path):
     cal = write_tif(flight / "cal" / "c.tif", scene(), T0)
     ev = make_event(cal)
     project = tct.events_to_project([ev], tct.MODE_THERMAL, False, tct.EmissivitySettings(), 3, {}, "t", str(flight))
-    assert project["calibration_images"][0]["path_relative"] == os.path.join("cal", "c.tif")
+    assert project["calibration_images"][0]["path_relative"] == "cal/c.tif"     # "/" on every system
     assert project["calibration_images"][0]["fit"]["slope"] == pytest.approx(ev.fit.slope)
     moved = tmp_path / "elsewhere" / "flight"
     shutil.move(str(flight), str(moved))

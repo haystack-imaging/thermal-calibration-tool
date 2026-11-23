@@ -622,7 +622,7 @@ def write_project(out: Path, shots: list, when_of: dict):
     for c in shots:
         path = (Path.cwd() / c["file"]).resolve()
         when = when_of[path.name]
-        images.append({"path": str(path), "path_relative": str(path.relative_to(root)),
+        images.append({"path": str(path), "path_relative": path.relative_to(root).as_posix(),
                        "timestamp": when[:19], "timestamp_source": "XMP", "timestamp_tz": when[19:],
                        "targets": [{"name": k, "color": colours[k], "polygon": poly, "ground_truth": c["gun"][k]}
                                    for k, poly in c["panels"].items()]})
