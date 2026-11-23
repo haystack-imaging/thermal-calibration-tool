@@ -5,10 +5,11 @@
 
 A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
 
-Version 0.2.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`); the GUI has been exercised on synthetic flights and real DJI M4T flights.
+Version 0.2.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
 
 ![Targets step with the live fit panel](GUI_screenshots/GUI_Home.png)
 
+The screenshots show the demo flight from `demo/make_demo_flight.py`: a synthetic wheat trial, a simulated DJI Matrice 4T thermal camera with a known drift, and three reference panels (black, grey, white) read with an IR thermometer at the start and the end of the flight. You can make the same flight on your computer, see [Try it without a drone](#try-it-without-a-drone).
 
 ## Why
 
@@ -36,6 +37,8 @@ One calibration shot is enough; it then applies one constant correction to the w
 - Comma or dot decimals, 0.0 °C is a valid reference, colour previews are refused instead of silently processed.
 
 ## Installation
+
+The repository used to be at `github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets`, and that address forwards here. Its history was rebuilt for the move, so `git pull` fails on copies made before it. Please clone it again.
 
 **The easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
 double-click the launcher for your system. It installs what is missing the first time (a few minutes, into a
@@ -81,6 +84,35 @@ Two things to know about that step:
 
 - The SDK applies its own measurement parameters from the R-JPEG (emissivity 0.95, distance 5 m, humidity 50 % on the M4T). Leave the tool's emissivity correction **off** unless you converted with emissivity 1.0.
 - DJI Thermal SDK 1.7 added a fifth field (`ambient_temp`) to its parameter struct. Wrappers that still declare four floats (thermal_parser at the time of writing) corrupt memory with that SDK; `tests/dji_sdk.py` has the corrected struct.
+
+## Try it without a drone
+
+`demo/make_demo_flight.py` makes a complete thermal flight on your computer. Nothing in it is real data.
+The field is a wheat trial with 48 plots (irrigated on the west half, rainfed on the east half), bare soil
+alleys and a mown headland with three reference panels, the operator with the thermometer, a car on the
+track and a row of trees with their shadows. A simulated Matrice 4T (640 × 512, 45° field of view, blur,
+vignetting, fixed-pattern noise, shutter steps) takes two low shots over the panels, one at the start and
+one at the end, and 55 survey images from 35 m in between. Its gain and offset drift by about 3 °C over the
+flight, as an uncooled camera does after take-off. The generator writes all of these numbers down, so you
+can check the tool's results against them.
+
+```bash
+python demo/make_demo_flight.py            # takes a few minutes, writes demo/flight/
+```
+
+| File in `demo/flight/` | Content |
+|------------------------|---------|
+| `calibration/`, `survey/` | float32 temperature TIFFs; with exiftool also DJI-style capture times, GPS and gimbal angles in EXIF/XMP |
+| `field_sheet.csv` | the thermometer readings of the three panels at both shots |
+| `demo.calib.json` | a project with the panels drawn and the readings typed in: open it with File › Open, then 3 · Process › Run |
+| `ground_truth.json` | the camera's gain and offset at every image, and the panel and plot temperatures |
+
+To learn the tool, add the two shots from `calibration/` as images, draw the panels, type the readings from
+`field_sheet.csv`, choose `survey/` as the survey folder and run. The fitted m and b should be close to
+`expected_m` and `expected_b` in `ground_truth.json`. On the default flight the raw camera is up to 2 °C off,
+and the corrected temperatures stay within about 0.2 to 0.4 °C of the truth. Most of the rest comes from the
+thermometer readings (rounded to 0.1 °C, with a small error of their own) and from the drift, which is not a
+straight line between the two shots. `--seed` makes a different field and readings; `--help` lists all options.
 
 ## Workflow
 
@@ -195,7 +227,7 @@ thermal-calibration-tool --version
 
 The headless run performs the same pre-flight check and writes the same files. Pixels marked nodata in the input (or NaN) stay nodata in the output; the output GeoTIFF declares NaN as its nodata value, so GIS software ignores them.
 
-## Emissivity correction (Advanced, usually off)
+## Emissivity correction (advanced, usually off)
 
 Switched on in **Settings** at the bottom of the rail. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies an emissivity when converting R-JPEGs (0.95 on the M4T). Enable the correction only if your images are apparent temperatures (converted with ε = 1.0). Sensor drift acts on what the sensor sees, so the correction works in apparent-temperature space: the reference readings are converted to the apparent temperature of each panel (its true temperature through the panel emissivity), the fit maps raw sensor values to those, m and b are applied to the raw survey pixels, and the result is converted to surface temperature with the scene emissivity (vegetation about 0.97 to 0.99). Broadband grey-body approximation:
 
@@ -203,7 +235,7 @@ Switched on in **Settings** at the bottom of the rail. The empirical line alread
 T_app⁴ = ε · T_obj⁴ + (1 − ε) · T_sky⁴
 ```
 
-One thing no calibration can remove: images converted at ε 0.95 of a scene whose true emissivity is 0.98 read about 1.3 to 1.6 °C too warm under a clear sky, because panels and thermometer sit at 0.95 as well. If that matters for your question, convert with ε 1.0 and use this correction.
+Images converted at ε 0.95 of a scene whose true emissivity is 0.98 read about 1.3 to 1.6 °C too warm under a clear sky. The calibration cannot remove this, because the panels and the thermometer sit at 0.95 as well. If that matters for your question, convert with ε 1.0 and use this correction.
 
 ## Multispectral mode
 
@@ -213,7 +245,7 @@ Switch **Sensor** to Multispectral for single-band reflectance calibration witho
 
 - 3 targets of clearly different temperature, each at least 10 to 15 px wide in the calibration shot (fly lower for that shot, or hold the drone over the panels as in the screenshots).
 - Measure every target with the IR gun within a minute of the drone shot; write the readings down with the time. Note the gun's emissivity setting.
-- Repeat at the end of the flight if drift matters (long flights, changing weather). A second shot taken mid-flight still helps: images after it get its coefficients, and the pre-flight check says how many that are.
+- Repeat at the end of the flight if drift matters (long flights, changing weather). A second shot taken mid-flight still helps: images after it get its coefficients, and the pre-flight check says how many images that affects.
 - Keep the camera's clock right; capture times drive the interpolation.
 
 ## Tests and test data
@@ -221,7 +253,8 @@ Switch **Sensor** to Multispectral for single-band reflectance calibration witho
 ```bash
 python -m pytest tests -q                       # closed-form checks, properties, golden data, I/O, GUI
 python tests/make_synthetic_flight.py           # synthetic M4T-like flight with known drift
-python tests/screenshot_gui.py                  # drives the real GUI and captures the screenshots
+python demo/make_demo_flight.py demo/flight    # the demo flight the README screenshots are made from
+python tests/screenshot_gui.py --config demo/flight/screenshot_config.json   # drives the real GUI, captures them
 ```
 
 See `tests/README.md` for what the suite guarantees, the golden data, the synthetic flight generator, the DJI SDK conversion of real R-JPEGs and the screenshot driver. CI runs the suite on Ubuntu (with a virtual display) and Windows.
@@ -248,7 +281,7 @@ folder is the release.
 
 ## Reporting problems and contributing
 
-Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calibration-tool/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, which is what makes a report actionable. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.
+Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calibration-tool/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, so the problem can be reproduced. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.
 
 ## How to cite
 
@@ -258,9 +291,8 @@ If the tool contributes to a publication, please cite it. `CITATION.cff` holds t
 
 A versioned DOI (Zenodo) will be added once the repository is archived there.
 
-## Author, acknowledgements and license
+## Author and license
 
 Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle). Questions and problems go to the issue tracker; the company can be reached through its website.
-
 
 GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK, needed to convert R-JPEGs, is DJI's and is not part of this repository.

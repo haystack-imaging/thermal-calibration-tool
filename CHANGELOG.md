@@ -6,15 +6,20 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `demo/make_demo_flight.py` makes a synthetic thermal flight over a wheat trial (reference panels,
+  operator, car, trees with shadows, a simulated M4T with a known drift), with a ready project file,
+  the thermometer readings and the true drift. With it the tool can be tried and checked without a
+  drone. The README screenshots now come from this flight.
 - `rust/`: a port of the engine to Rust (`thermal-core`, validated against the golden flight), a headless
   CLI (`thermal-calibration`) and a Tauri desktop app with a web front-end, with its own test suite
   (engine, front-end, shell state, end-to-end inside the real app) and CI. The Python tool remains the
   release until the app is complete.
 
 ### Changed
-- Published by Haystack Imaging: the repository moved to `github.com/haystack-imaging/thermal-calibration-tool`
-  (the old address redirects), credits and citation updated, and the desktop app carries the company's
-  identity (palette, logo, pixel wordmark, a dark theme that follows the system).
+- Published by Haystack Imaging. The repository moved to `github.com/haystack-imaging/thermal-calibration-tool`
+  and the old address forwards there. The history was rebuilt for the move, so copies cloned before it
+  cannot be updated with `git pull`; clone again. Credits and citation are updated, and the desktop app
+  has the company's look (palette, logo, pixel wordmark, a dark theme that follows the system).
 
 ## [0.2.0] - 2026-10-12
 
