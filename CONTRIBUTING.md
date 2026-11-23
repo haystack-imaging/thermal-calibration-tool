@@ -1,6 +1,7 @@
 # Contributing
 
 Bug reports, feature requests and pull requests are welcome.
+Contributions are accepted under the project's license, GPL-3.0 (see `LICENSE`).
 
 ## Reporting a problem
 
