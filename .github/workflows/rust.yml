@@ -37,7 +37,12 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests (unit + golden comparison with the Python reference)
         working-directory: rust
-        run: cargo test --workspace
+        shell: bash
+        run: cargo test --workspace 2>&1 | tee "$RUNNER_TEMP/cargo-test.log"
+      - name: Failing tests as an annotation
+        if: failure()
+        shell: bash
+        run: python .github/scripts/log_annotation.py "$RUNNER_TEMP/cargo-test.log" "cargo test (${{ matrix.os }})"
       - name: CLI on the golden flight
         working-directory: rust
         run: cargo run -p thermal-cli -- --project ../tests/data/golden_flight/flight.calib.json --output ${{ runner.temp }}/golden_out
@@ -73,6 +78,10 @@ jobs:
           npm run build
       - name: "Shell: lint, state tests, end-to-end flow on a virtual display"
         working-directory: rust/app/src-tauri
+        shell: bash
         run: |
           cargo clippy --all-targets -- -D warnings
-          xvfb-run -a -s "-screen 0 1600x1000x24" cargo test -- --nocapture
+          xvfb-run -a -s "-screen 0 1600x1000x24" cargo test -- --nocapture 2>&1 | tee "$RUNNER_TEMP/app-test.log"
+      - name: Failing tests as an annotation
+        if: failure()
+        run: python .github/scripts/log_annotation.py "$RUNNER_TEMP/app-test.log" "app tests"
