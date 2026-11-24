@@ -13,8 +13,9 @@ tool is unchanged apart from the version number.
 ### Added
 - Installers for the desktop app with every release: `.exe` and `.msi` for Windows, one `.dmg` for macOS
   (Apple silicon and Intel), an AppImage, `.deb` and `.rpm` for Linux. `.github/workflows/release-app.yml`
-  builds them and starts each built app once before it attaches them to the release. They are not signed
-  yet, so Windows and macOS ask for confirmation on the first start. The README says what to click.
+  builds them and starts each built app once before it attaches them to the release. They are not signed,
+  so Windows and macOS ask for confirmation on the first start. The README says what to click, and how to
+  build the app from source instead.
 - The app's tests, the end-to-end flow inside the real app included, run on Windows and macOS as well as
   Linux. The Python tests run on macOS too.
 

@@ -120,6 +120,7 @@ jobs:
           find dist -type f | while read -r f; do
             cp "$f" "upload/$(basename "$f" | sed -e 's/Thermal Calibration Tool/thermal-calibration-tool/')"
           done
+          (cd upload && sha256sum * > SHA256SUMS.txt)
           ls -l upload
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "Installers for $TAG."
           gh release upload "$TAG" upload/* --clobber

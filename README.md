@@ -48,7 +48,7 @@ The repository used to be at `github.com/MoritzNelle/GUI-Software-to-calibrate-T
 | macOS (Apple silicon and Intel) | `…_universal.dmg` | Drag the app into *Applications*. macOS blocks it the first time: open *System Settings* → *Privacy & Security* and click *Open Anyway* |
 | Linux   | `….AppImage` (make it executable, then run it), or the `.deb` / `.rpm` package | |
 
-The installers are not signed yet, which is why Windows and macOS ask once.
+The installers are not signed, which is why Windows and macOS ask once. GitHub builds them from the tagged source with the public workflow `.github/workflows/release-app.yml`, and `SHA256SUMS.txt` in the release has their checksums. If you have doubts about running an unsigned program, the source code is open and public: you can read it and build the app on your own computer (see [Building](rust/README.md#building)), or run the Python tool from source as described below.
 
 **The Python tool, the easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
 double-click the launcher for your system. It installs what is missing the first time (a few minutes, into a
