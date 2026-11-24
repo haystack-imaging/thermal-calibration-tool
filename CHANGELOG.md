@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
+The desktop app gets installers for Windows, macOS and Linux, so it can be used without Python. The Python
+tool is unchanged apart from the version number.
+
+### Added
+- Installers for the desktop app with every release: `.exe` and `.msi` for Windows, one `.dmg` for macOS
+  (Apple silicon and Intel), an AppImage, `.deb` and `.rpm` for Linux. `.github/workflows/release-app.yml`
+  builds them and starts each built app once before it attaches them to the release. They are not signed
+  yet, so Windows and macOS ask for confirmation on the first start. The README says what to click.
+- The app's tests, the end-to-end flow inside the real app included, run on Windows and macOS as well as
+  Linux. The Python tests run on macOS too.
+
+### Changed
+- The Rust crates and the app have version 0.3.0, the same as the Python tool.
+
+### Fixed
+- Two GUI tests hung on macOS inside Tk's `update()`, which waits for an empty event queue: after many
+  test windows in one process, macOS kept that queue busy. The tests now handle a limited number of events
+  at a time. The tool runs a single window with `mainloop()` and does not wait like that.
+- The end-to-end test of the app clicked next to the wanted pixel on small screens (the Windows and macOS
+  runners have 1024 x 768). It now zooms in before it clicks and checks every polygon corner exactly.
+
 ## [0.2.1] - 2026-11-24
 
 The first release from the new address. It fixes two problems on Windows and adds a demo flight, so the

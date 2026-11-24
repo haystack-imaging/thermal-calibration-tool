@@ -5,7 +5,7 @@
 
 A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
 
-Version 0.2.1 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
+Version 0.3.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
 
 ![Targets step with the live fit panel](GUI_screenshots/GUI_Home.png)
 
@@ -40,7 +40,17 @@ One calibration shot is enough; it then applies one constant correction to the w
 
 The repository used to be at `github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets`, and that address forwards here. Its history was rebuilt for the move, so `git pull` fails on copies made before it. Please clone it again.
 
-**The easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
+**The desktop app:** the [latest release](https://github.com/haystack-imaging/thermal-calibration-tool/releases/latest) has installers for the desktop app, the Rust version of this tool (see [Desktop app](#desktop-app-rust)). It needs no Python.
+
+| System  | File | First start |
+|---------|------|-------------|
+| Windows 10 or 11 | `…_x64-setup.exe` or `…_x64_en-US.msi` | Windows warns about an unknown publisher: *More info* → *Run anyway* |
+| macOS (Apple silicon and Intel) | `…_universal.dmg` | Drag the app into *Applications*. macOS blocks it the first time: open *System Settings* → *Privacy & Security* and click *Open Anyway* |
+| Linux   | `….AppImage` (make it executable, then run it), or the `.deb` / `.rpm` package | |
+
+The installers are not signed yet, which is why Windows and macOS ask once.
+
+**The Python tool, the easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
 double-click the launcher for your system. It installs what is missing the first time (a few minutes, into a
 private `.venv` folder), keeps it current afterwards and starts the tool; later double-clicks just start it.
 
@@ -272,12 +282,13 @@ Background on why uncooled thermal cameras need field calibration and how the em
 - Kelly, J. et al. (2019). *Challenges and Best Practices for Deriving Temperature Data from an Uncalibrated UAV Thermal Infrared Camera.* Remote Sensing.
 - Han, Y. et al. (2020). *Field-Based Calibration of Unmanned Aerial Vehicle Thermal Infrared Imagery with Temperature-Controlled References.* Sensors.
 
-## Rust rewrite (in progress)
+## Desktop app (Rust)
 
-A port to Rust with a Tauri desktop shell lives in [`rust/`](rust/README.md). Its engine reproduces this
-tool's golden flight to better than 1e-5 and its command line (`thermal-calibration --project FILE`)
-writes the same outputs; the desktop app is being built. Until it is complete, the Python tool in this
-folder is the release.
+The desktop app in [`rust/`](rust/README.md) is a port of this tool to Rust with a Tauri shell. Its engine
+reproduces this tool's golden flight to better than 1e-5, and its command line (`thermal-calibration
+--project FILE`) writes the same outputs. The app has the same three steps, plus undo/redo and an Inspect
+view for checking the calibrated images. Installers are on the releases page (see [Installation](#installation)).
+The Python tool stays the reference: the golden data and the method tests come from it.
 
 ## Reporting problems and contributing
 
@@ -287,7 +298,7 @@ Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calib
 
 If the tool contributes to a publication, please cite it. `CITATION.cff` holds the metadata (GitHub shows a "Cite this repository" button from it):
 
-> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.2.1) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
+> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.3.0) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
 A versioned DOI (Zenodo) will be added once the repository is archived there.
 

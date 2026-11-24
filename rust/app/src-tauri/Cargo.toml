@@ -1,7 +1,7 @@
 [package]
 name = "thermal-calibration-app"
 description = "Thermal Calibration Tool desktop app (Tauri shell over thermal-core)"
-version = "0.3.0-dev"
+version = "0.3.0"
 edition = "2021"
 license = "GPL-3.0-only"
 

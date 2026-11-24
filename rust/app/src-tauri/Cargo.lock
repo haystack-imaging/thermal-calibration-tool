@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "thermal-calibration-app"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "cairo-rs",
@@ -3811,7 +3811,7 @@ dependencies = [
 
 [[package]]
 name = "thermal-core"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "csv",

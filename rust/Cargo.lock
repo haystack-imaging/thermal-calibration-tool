@@ -481,14 +481,14 @@ dependencies = [
 
 [[package]]
 name = "thermal-cli"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "thermal-core",
 ]
 
 [[package]]
 name = "thermal-core"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "csv",
