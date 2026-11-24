@@ -45,12 +45,27 @@ def app(tk_root):
     return a
 
 
+def update(root, limit=1000):
+    """Handle the pending Tk events (at most `limit`), then the idle tasks.
+
+    Used instead of `root.update()`, which returns only once the event queue is empty. On macOS, after
+    many Tk windows in one test process, AppKit keeps that queue busy and `update()` never returns (seen
+    on the GitHub macOS runner: Tk_UpdateObjCmd spinning in the CFRunLoop, no Python callback involved).
+    The tool itself runs `mainloop()`, which does not wait for an empty queue."""
+    import _tkinter
+    flags = _tkinter.ALL_EVENTS | _tkinter.DONT_WAIT
+    for _ in range(limit):
+        if not root.tk.dooneevent(flags):
+            break
+    root.update_idletasks()
+
+
 def pump(root, condition, timeout=10.0, step=0.02):
     """Run the Tk event loop until condition() is true or the timeout passes."""
     import time
     t_end = time.time() + timeout
     while time.time() < t_end:
-        root.update()
+        update(root)
         if condition():
             return True
         time.sleep(step)

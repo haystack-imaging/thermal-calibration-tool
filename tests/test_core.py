@@ -23,6 +23,7 @@ from rasterio.transform import from_origin
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 import thermal_calibration_tool as tct  # noqa: E402
+from conftest import update  # noqa: E402
 
 DATA = HERE / "data"
 T0 = dt.datetime(2026, 6, 1, 10, 0, 0)
@@ -412,7 +413,7 @@ def test_m1_batch_runs_in_worker_thread(app, tmp_path):
     app._start_batch_processing()
     assert app._batch_thread is not None and app.start_btn.instate(['disabled'])
     for _ in range(300):
-        app.root.update()
+        update(app.root)
         if not app._batch_thread.is_alive() and app.start_btn.instate(['!disabled']):
             break
         time.sleep(0.02)

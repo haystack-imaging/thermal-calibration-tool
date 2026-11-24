@@ -51,19 +51,6 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[exif,test]" pytest-github-actions-annotate-failures pytest-timeout
-      - name: Diagnose the hanging batch test (temporary)
-        shell: bash
-        run: |
-          python -m pytest tests/test_core.py -v -p no:timeout -o faulthandler_timeout=0 &
-          pid=$!
-          for i in $(seq 1 240); do sleep 1; kill -0 $pid 2>/dev/null || break; done
-          if kill -0 $pid 2>/dev/null; then
-            echo "still running after 240 s"
-            ps -o pid,%cpu,state,time,command -p $pid
-            sleep 5; ps -o pid,%cpu,state,time -p $pid
-            sample $pid 5 -file "$RUNNER_TEMP/sample.txt" || true
-            grep -vE '^ +[0-9]+ +\?\?\?' "$RUNNER_TEMP/sample.txt" | sed -n '1,260p' || true
-            kill -9 $pid
-          fi
-          wait $pid || true
+          pip install -e ".[exif,test]" pytest-github-actions-annotate-failures
+      - name: All tests (exiftool-dependent ones are skipped)
+        run: python -m pytest tests -q --timeout 120

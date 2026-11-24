@@ -9,7 +9,7 @@ from tkinter import ttk
 import pytest
 
 import thermal_calibration_tool as tct
-from conftest import pump
+from conftest import pump, update
 from helpers import T0, TARGETS, poly, scene, write_tif
 
 
@@ -217,7 +217,7 @@ def test_mode_switch_updates_chrome(app, tmp_path):
 def test_drawing_flow_with_readout_and_overlay(app, tmp_path):
     p = write_tif(tmp_path / "cal.tif", scene(), T0)
     app._add_calibration_images([p])
-    app.root.update()
+    update(app.root)
     app._start_polygon_selection(0)
     assert app.drawing_polygon and app.view.loupe_enabled and app.view.canvas.cget("cursor") == "crosshair"
     for pt in poly("T1")[:3]:
@@ -310,7 +310,7 @@ def test_guidance_walks_a_first_time_user_through_step_2(app, tmp_path):
 def test_redraw_hides_the_old_polygon_at_once_and_esc_restores_it(app, tmp_path):
     p = write_tif(tmp_path / "cal.tif", scene(), T0)
     app._add_calibration_images([p])
-    app.root.update()
+    update(app.root)
     t = app.calibration_events[0].targets[0]
     app._start_polygon_selection(0)
     for pt in poly("T1"):
@@ -335,7 +335,7 @@ def test_redraw_hides_the_old_polygon_at_once_and_esc_restores_it(app, tmp_path)
 def test_enter_moves_to_the_next_reading_field(app, tmp_path):
     p = write_tif(tmp_path / "cal.tif", scene(), T0)
     app._add_calibration_images([p])
-    app.root.update()
+    update(app.root)
     app.target_rows[0].gt_var.set("15")
     app._on_gt_enter(0)
     assert app.root.focus_get() in (app.target_rows[1].gt_entry, None)
@@ -347,7 +347,7 @@ def test_targets_can_be_named_and_names_are_shared(app, tmp_path):
     a = write_tif(tmp_path / "a.tif", scene(), T0)
     b = write_tif(tmp_path / "b.tif", scene(), T0 + dt.timedelta(minutes=20))
     app._add_calibration_images([a, b])
-    app.root.update()
+    update(app.root)
     row = app.target_rows[0]
     row.begin_rename()
     row.name_entry.delete(0, 'end'); row.name_entry.insert(0, "black")
@@ -372,7 +372,7 @@ def test_targets_can_be_named_and_names_are_shared(app, tmp_path):
 
 
 def test_empty_canvas_shows_a_hint_and_window_title_follows_the_project(app):
-    app.root.update()
+    update(app.root)
     c = app.view.canvas
     texts = [c.itemcget(i, 'text') for i in c.find_withtag('placeholder')]
     assert texts and "No calibration image yet" in texts[0]
@@ -436,7 +436,7 @@ def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
     app.survey_entry.insert(0, str(survey))
     app._on_survey_changed()
     for _ in range(300):
-        app.root.update()
+        update(app.root)
         if len(app._survey_timestamps) >= 3 and app._last_preflight is not None:
             break
         time.sleep(0.03)
@@ -445,7 +445,7 @@ def test_process_step_guidance_and_empty_table_hint(app, tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "askokcancel", lambda *a, **k: True)
     btn.invoke()
     for _ in range(1500):
-        app.root.update()
+        update(app.root)
         if app._batch_thread and not app._batch_thread.is_alive() and app.start_btn.instate(['!disabled']):
             break
         time.sleep(0.02)
