@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-24
+
+The demo flight comes with the app now, so trying the tool needs no Python and no drone.
+
 ### Added
 - The desktop app has the demo flight built in: *Open* → *Open demo flight*, or the button in step 1
   while no images are loaded. It is a smaller version of the synthetic flight (two calibration shots,

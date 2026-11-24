@@ -116,6 +116,6 @@ Please report problems in the [issue tracker](https://github.com/haystack-imagin
 
 If the tool helps a publication, please cite it (GitHub's *Cite this repository* button uses `CITATION.cff`):
 
-> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.3.0) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
+> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.3.1) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
 Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle). GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK is DJI's and not part of this repository.

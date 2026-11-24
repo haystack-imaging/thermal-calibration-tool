@@ -1,7 +1,7 @@
 {
   "name": "thermal-calibration-app",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Thermal Calibration Tool: web front-end of the Tauri desktop app",
   "type": "module",
   "scripts": {
