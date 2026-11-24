@@ -1,0 +1,119 @@
+name: app installers
+
+# Builds the desktop app's installers on Linux, Windows and macOS and starts each built app once
+# (rust/app/tests/e2e/smoke.js). A version tag (v*) attaches the installers to that tag's release; a
+# draft release is made if there is none yet. A push that changes this file, the bundle settings or the
+# smoke script builds them as a test, without a release; so does a manual run.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths:
+      - ".github/workflows/release-app.yml"
+      - "rust/app/src-tauri/tauri.conf.json"
+      - "rust/app/tests/e2e/smoke.js"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: installers (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-22.04 # the oldest supported Ubuntu, so the AppImage runs on older systems too
+            args: ""
+            bin: target/release/thermal-calibration-app
+            bundles: |
+              rust/app/src-tauri/target/release/bundle/appimage/*.AppImage
+              rust/app/src-tauri/target/release/bundle/deb/*.deb
+              rust/app/src-tauri/target/release/bundle/rpm/*.rpm
+          - name: Windows
+            os: windows-latest
+            args: ""
+            bin: target/release/thermal-calibration-app.exe
+            bundles: |
+              rust/app/src-tauri/target/release/bundle/msi/*.msi
+              rust/app/src-tauri/target/release/bundle/nsis/*.exe
+          - name: macOS
+            os: macos-latest
+            args: "--target universal-apple-darwin" # one app for Apple silicon and Intel
+            bin: target/universal-apple-darwin/release/thermal-calibration-app
+            bundles: |
+              rust/app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.name == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: System packages (WebKitGTK, GTK, AppImage tools, a virtual display)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb
+      - name: Build the installers
+        working-directory: rust/app
+        run: |
+          npm ci
+          npx tauri build ${{ matrix.args }}
+      - name: Start the built app once (Linux, macOS)
+        if: runner.os != 'Windows'
+        working-directory: rust/app/src-tauri
+        shell: bash
+        run: |
+          run=""; if [ "$RUNNER_OS" = Linux ]; then run="xvfb-run -a"; fi
+          $run ./${{ matrix.bin }} --e2e-script ../tests/e2e/smoke.js --e2e-report "$RUNNER_TEMP/smoke.json" --e2e-timeout 90
+      - name: Start the built app once (Windows)
+        if: runner.os == 'Windows'
+        working-directory: rust/app/src-tauri
+        shell: pwsh
+        run: |
+          # a release build is a GUI program, so wait for it explicitly
+          $exe = (Resolve-Path "${{ matrix.bin }}").Path
+          $script = (Resolve-Path "..\tests\e2e\smoke.js").Path
+          $p = Start-Process -Wait -PassThru -FilePath $exe -ArgumentList @("--e2e-script", $script, "--e2e-report", "$env:RUNNER_TEMP\smoke.json", "--e2e-timeout", "90")
+          if ($p.ExitCode -ne 0) { Write-Error "app exit code $($p.ExitCode)"; exit 1 }
+      - name: Smoke report
+        if: always()
+        shell: bash
+        run: |
+          node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify(r, null, 1)); process.exit(r.ok ? 0 : 1)' "$RUNNER_TEMP/smoke.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.name }}
+          path: ${{ matrix.bundles }}
+          if-no-files-found: error
+
+  attach:
+    name: attach to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: dist
+      - name: Upload the installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "Installers for $TAG."
+          gh release upload "$TAG" dist/* --clobber

@@ -1,5 +1,5 @@
 //! Runs the desktop app with `tests/e2e/flow.js` inside its web view on the golden flight and checks
-//! the report. Needs a display (`DISPLAY` or `WAYLAND_DISPLAY`) and the golden flight
+//! the report. Needs a display (on Linux `DISPLAY` or `WAYLAND_DISPLAY`) and the golden flight
 //! (`python3 rust/tools/make_golden_flight.py`); skipped otherwise. `THERMAL_E2E_LAUNCH` may hold a
 //! launcher prefix, e.g. `systemd-run --user --wait --collect -q --setenv=DISPLAY=:0`, for environments
 //! where the app must start outside the test's own process tree.
@@ -60,7 +60,11 @@ fn ensure_dev_server() -> Option<std::process::Child> {
 fn full_flow_on_the_golden_flight() {
     let root = repo_root();
     let flight = root.join("tests/data/golden_flight");
-    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+    // Windows and macOS always have a desktop; on Linux it needs X11 or Wayland (CI: xvfb-run)
+    if cfg!(target_os = "linux")
+        && std::env::var_os("DISPLAY").is_none()
+        && std::env::var_os("WAYLAND_DISPLAY").is_none()
+    {
         eprintln!("SKIPPED: no display");
         return;
     }

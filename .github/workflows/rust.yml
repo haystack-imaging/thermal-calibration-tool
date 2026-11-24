@@ -48,8 +48,12 @@ jobs:
         run: cargo run -p thermal-cli -- --project ../tests/data/golden_flight/flight.calib.json --output ${{ runner.temp }}/golden_out
 
   app:
-    name: desktop app (Linux)
-    runs-on: ubuntu-latest
+    name: desktop app (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -62,6 +66,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: System packages (WebKitGTK, GTK, a virtual display)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xvfb
@@ -76,12 +81,17 @@ jobs:
           npm ci
           npm test
           npm run build
-      - name: "Shell: lint, state tests, end-to-end flow on a virtual display"
+      - name: "Shell: lint, state tests, end-to-end flow in the real app"
         working-directory: rust/app/src-tauri
         shell: bash
         run: |
           cargo clippy --all-targets -- -D warnings
-          xvfb-run -a -s "-screen 0 1600x1000x24" cargo test -- --nocapture 2>&1 | tee "$RUNNER_TEMP/app-test.log"
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s "-screen 0 1600x1000x24" cargo test -- --nocapture 2>&1 | tee "$RUNNER_TEMP/app-test.log"
+          else
+            cargo test -- --nocapture 2>&1 | tee "$RUNNER_TEMP/app-test.log"
+          fi
       - name: Failing tests as an annotation
         if: failure()
-        run: python .github/scripts/log_annotation.py "$RUNNER_TEMP/app-test.log" "app tests"
+        shell: bash
+        run: python .github/scripts/log_annotation.py "$RUNNER_TEMP/app-test.log" "app tests (${{ matrix.os }})"

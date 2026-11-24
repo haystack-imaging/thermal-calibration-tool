@@ -26,6 +26,21 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "publisher": "Haystack Imaging",
+    "copyright": "Copyright 2026 Moritz Nelle",
+    "license": "GPL-3.0-only",
+    "homepage": "https://github.com/haystack-imaging/thermal-calibration-tool",
+    "shortDescription": "Calibrates thermal drone images with reference panels measured in the field",
+    "longDescription": "Corrects the drift of uncooled thermal drone cameras with reference targets measured in the field (Empirical Line Method). Built for the DJI Matrice 4T, works with any single-band temperature image.",
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }
