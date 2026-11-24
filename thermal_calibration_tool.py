@@ -65,7 +65,7 @@ try:  # optional: regression plot
 except Exception:  # pragma: no cover
     HAS_MATPLOTLIB = False
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 TOOL_NAME = "Thermal / MSI Calibration Tool"
 
 # =============================================================================

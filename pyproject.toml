@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "thermal-calibration-tool"
-version = "0.2.0"
+version = "0.2.1"
 description = "GUI to correct thermal (and single-band multispectral) drone images with the Empirical Line Method using field calibration targets"
 readme = "README.md"
 license = "GPL-3.0-only"

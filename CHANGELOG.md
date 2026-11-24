@@ -5,27 +5,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-24
+
+The first release from the new address. It fixes two problems on Windows and adds a demo flight, so the
+tool can be tried without a drone.
+
 ### Added
-- `demo/make_demo_flight.py` makes a synthetic thermal flight over a wheat trial (reference panels,
-  operator, car, trees with shadows, a simulated M4T with a known drift), with a ready project file,
-  the thermometer readings and the true drift. With it the tool can be tried and checked without a
-  drone. The README screenshots now come from this flight.
-- `rust/`: a port of the engine to Rust (`thermal-core`, validated against the golden flight), a headless
-  CLI (`thermal-calibration`) and a Tauri desktop app with a web front-end, with its own test suite
-  (engine, front-end, shell state, end-to-end inside the real app) and CI. The Python tool remains the
-  release until the app is complete.
+- `demo/make_demo_flight.py` makes a synthetic thermal flight over a wheat trial: reference panels, an
+  operator, a car and trees with shadows, seen through a simulated M4T with a known drift. It writes a
+  ready project file, the thermometer readings and the true drift, so you can try the tool and check its
+  results without a drone. The README screenshots are made from this flight.
+- `rust/` holds a port to Rust: the engine (`thermal-core`, checked against the golden flight), a headless
+  CLI (`thermal-calibration`) and a Tauri desktop app with a web front end. It has its own tests (engine,
+  front end, shell state, an end-to-end run inside the real app) and its own CI. There are no installers
+  for the app yet, so the Python tool is still the one to download.
 
 ### Changed
-- Published by Haystack Imaging. The repository moved to `github.com/haystack-imaging/thermal-calibration-tool`
-  and the old address forwards there. The history was rebuilt for the move, so copies cloned before it
-  cannot be updated with `git pull`; clone again. Credits and citation are updated, and the desktop app
-  has the company's look (palette, logo, pixel wordmark, a dark theme that follows the system).
+- Haystack Imaging publishes the tool now. The repository moved to
+  `github.com/haystack-imaging/thermal-calibration-tool`, and the old address forwards there. The history
+  was rebuilt for the move, so a copy cloned before it cannot be updated with `git pull`: clone it again.
+  Credits and citation name Haystack Imaging, and the desktop app has the company's look (palette, logo,
+  pixel wordmark and a dark theme that follows the system).
 
 ### Fixed
 - On Windows a headless run (`--project … --run`) stopped with an encoding error when its output went to a
   file or a pipe, because that output cannot hold the ✓ of the pre-flight list. It now prints `?` instead.
-- Project files keep the relative image paths with `/` on every system, so a project saved on Windows opens
-  on Linux and macOS. Older projects with `\` still open.
+- Project files store the relative image paths with `/` on every system, so a project saved on Windows
+  opens on Linux and macOS. Older projects with `\` still open, and the rebuilt path no longer mixes `\`
+  and `/`.
 
 ## [0.2.0] - 2026-10-12
 

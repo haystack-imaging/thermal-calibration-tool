@@ -5,7 +5,7 @@
 
 A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
 
-Version 0.2.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
+Version 0.2.1 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
 
 ![Targets step with the live fit panel](GUI_screenshots/GUI_Home.png)
 
@@ -287,7 +287,7 @@ Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calib
 
 If the tool contributes to a publication, please cite it. `CITATION.cff` holds the metadata (GitHub shows a "Cite this repository" button from it):
 
-> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.2.0) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
+> Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.2.1) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
 A versioned DOI (Zenodo) will be added once the repository is archived there.
 
