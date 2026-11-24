@@ -114,6 +114,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
+          # "Thermal Calibration Tool_0.3.0_x64-setup.exe" -> "thermal-calibration-tool_0.3.0_x64-setup.exe"
+          for f in dist/*; do mv "$f" "dist/$(basename "$f" | sed -e 's/Thermal Calibration Tool/thermal-calibration-tool/')"; done
           ls -l dist
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "Installers for $TAG."
           gh release upload "$TAG" dist/* --clobber

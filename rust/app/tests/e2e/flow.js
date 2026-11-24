@@ -12,6 +12,7 @@ const close = (a, b, tol) => Math.abs(a - b) <= tol;
 
 // ---------------------------------------------------------------- the app came up
 await e2e.until(() => app() && state(), 20000);
+e2e.log(`screen ${screen.width}x${screen.height}, window ${innerWidth}x${innerHeight}, devicePixelRatio ${devicePixelRatio}`);
 await e2e.report("app loaded", state().events.length === 0 && app().activeStep() === 1, { version: state().version });
 await e2e.report("empty guidance", /Choose the sensor type/.test(app().guidance().images.head) && /Choose the sensor type/.test(e2e.$(".guide .head").textContent));
 
@@ -49,11 +50,30 @@ await e2e.report("help icons open their text on click", e2e.$("#tip").textConten
 e2e.click(".help");
 await e2e.until(() => document.querySelector("#tip").hidden);
 
+// A click lands on a whole CSS pixel in some web views, and on a small screen the image is shown below
+// 1:1, where one CSS pixel spans more than one image pixel and some pixels cannot be hit at all. So zoom
+// in on the point first (3 screen pixels per image pixel): every corner then lands on its own pixel,
+// whatever the screen size.
 const clickImage = (x, y) => {
+  const v = app().viewer;
   const canvas = e2e.$("#viewer");
   const r = canvas.getBoundingClientRect();
-  const [cx, cy] = app().viewer.toCanvas(x + 0.5, y + 0.5);
-  e2e.mouse(canvas, "mousedown", r.left + cx, r.top + cy);
+  let [cx, cy] = v.toCanvas(x + 0.5, y + 0.5);
+  const m = 24;
+  if (v.scale < 3 || cx < m || cy < m || cx > r.width - m || cy > r.height - m) {
+    v.scale = Math.max(v.scale, 3);
+    v.ox = x + 0.5 - r.width / (2 * v.scale);
+    v.oy = y + 0.5 - r.height / (2 * v.scale);
+    v.fitted = false;
+    v.redraw();
+    [cx, cy] = v.toCanvas(x + 0.5, y + 0.5);
+  }
+  e2e.mouse(canvas, "mousedown", r.left + Math.round(cx), r.top + Math.round(cy));
+};
+// the same corners, in any order (four corners are stored sorted as a rectangle)
+const samePoints = (a, b) => {
+  const key = (pts) => pts.map(([x, y]) => `${x},${y}`).sort().join(" ");
+  return a.length === b.length && key(a) === key(b);
 };
 const keyWindow = (key, mods = {}) => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...mods }));
 const drawPolygon = async (target, corners, closeWith = "enter") => {
@@ -106,7 +126,7 @@ for (let i = 0; i < 3; i++) {
       await e2e.until(() => !app().drawing() && state().events[1].targets[1].polygon.length === 4);
     } else await drawPolygon(j, shot.polygons[j], j === 1 ? "first" : "enter");
     const t = state().events[i].targets[j];
-    await e2e.report(`shot ${i + 1}: polygon T${j + 1}`, t.polygon.length === 4 && t.pixels > 1000 && t.inner.length === 1, { mean: t.mean, pixels: t.pixels });
+    await e2e.report(`shot ${i + 1}: polygon T${j + 1}`, samePoints(t.polygon, shot.polygons[j]) && t.pixels > 1000 && t.inner.length === 1, { polygon: t.polygon, wanted: shot.polygons[j], mean: t.mean, pixels: t.pixels });
     if (j === 0) await e2e.report(`shot ${i + 1}: reading field focused after the polygon closed`, document.activeElement === document.querySelector(`[data-gt="${j}"]`));
     e2e.type(`[data-gt="${j}"]`, String(shot.gun[j]).replace(".", ","));
     await e2e.until(() => state().events[i].targets[j].ground_truth !== null);
@@ -206,11 +226,14 @@ const pf = app().preflight();
 await e2e.report("pre-flight lists 6 images", !pf.blocking && pf.files.length === 6 && /6 images ready/.test(app().guidance().process.head), pf.lines);
 await e2e.report("timeline shows the survey", state().survey_timeline.length === 6 && e2e.$("#timeline").querySelectorAll("rect").length >= 6);
 {
+  // the plot is drawn at the timeline's width minus 28, but never below 200; a window on a small screen
+  // leaves little room, so widen the fit panel by a step instead of setting a fixed width
   const w0 = e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width;
-  e2e.$("#fit-panel").style.width = "600px";
+  const fp = e2e.$("#fit-panel");
+  fp.style.width = `${fp.offsetWidth + 120}px`;
   await e2e.until(() => e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width !== w0);
   const w1 = e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width;
-  await e2e.report("timeline redraws at the new width when the window changes size", Math.abs(w1 - (e2e.$("#timeline").clientWidth - 28)) < 2 && w1 < w0, { before: w0, after: w1 });
+  await e2e.report("timeline redraws at the new width when the window changes size", Math.abs(w1 - Math.max(e2e.$("#timeline").clientWidth - 28, 200)) < 2 && w1 < w0, { before: w0, after: w1 });
   e2e.$("#fit-panel").style.width = "";
   await e2e.until(() => e2e.$("#timeline svg.tl-plot").viewBox.baseVal.width === w0);
 }
