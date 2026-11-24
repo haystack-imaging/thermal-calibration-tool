@@ -109,6 +109,8 @@ fn full_flow_on_the_golden_flight() {
         "project": work.join("flight-e2e.calib.json").to_string_lossy(),
         "report": work.join("fit_report.html").to_string_lossy(),
         "csv": work.join("inspect_table.csv").to_string_lossy(),
+        // the demo flight behind Open > Open demo flight, if it was generated for this build
+        "demo": Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/demo-flight/demo.calib.json").is_file(),
     });
     let env_file = work.join("env.json");
     std::fs::write(&env_file, serde_json::to_string_pretty(&env).unwrap()).unwrap();

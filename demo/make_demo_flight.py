@@ -8,6 +8,7 @@ tool takes the drift out.
 
     python demo/make_demo_flight.py              # writes demo/flight/
     python demo/make_demo_flight.py OUT --seed 7
+    python demo/make_demo_flight.py OUT --every 4   # every 4th survey image only (the demo in the app)
 
 What it writes:
     calibration/            two low shots over the reference panels, at the start and at the end
@@ -15,6 +16,7 @@ What it writes:
     field_sheet.csv         the panel readings of a handheld IR thermometer (emissivity 0.95) per shot
     ground_truth.json       the camera's gain and offset at every image, panel and plot temperatures
     demo.calib.json         a project with the panels drawn and the readings typed in: open it, press Run
+    README.txt              what the folder is and how to open it
     screenshot_config.json  panel corners in pixels and the readings, for tests/screenshot_gui.py
 
 The scene: 48 plots of wheat (12 columns, 4 replicates), irrigated on the west half and rainfed on the
@@ -615,14 +617,16 @@ def exif_args(path: Path, when: datetime, pose: Pose, rng) -> list:
 
 def write_project(out: Path, shots: list, when_of: dict):
     """demo.calib.json: the panels already drawn and the readings typed in, ready to open and run.
-    Paths are absolute (the flight was made on this computer) plus relative to the project file."""
+    All paths are relative to the project file, so the folder works wherever it is copied or unpacked
+    (the tool looks for images and folders next to the project when the stored path is not found)."""
     root = out.resolve()
     colours = {"black": "#E63946", "grey": "#2A9D8F", "white": "#E9C46A"}     # the tool's first three
     images = []
     for c in shots:
         path = (Path.cwd() / c["file"]).resolve()
         when = when_of[path.name]
-        images.append({"path": str(path), "path_relative": path.relative_to(root).as_posix(),
+        rel = path.relative_to(root).as_posix()
+        images.append({"path": rel, "path_relative": rel,
                        "timestamp": when[:19], "timestamp_source": "XMP", "timestamp_tz": when[19:],
                        "targets": [{"name": k, "color": colours[k], "polygon": poly, "ground_truth": c["gun"][k]}
                                    for k, poly in c["panels"].items()]})
@@ -630,9 +634,30 @@ def write_project(out: Path, shots: list, when_of: dict):
                "title": "Demo flight (synthetic)", "mode": "thermal", "msi_single_point": False, "roi_inset_px": 3,
                "emissivity": {"enabled": False, "target_emissivity": 0.95, "scene_emissivity": 0.98, "sky_temperature": -40.0},
                "calibration_images": images,
-               "survey": {"folder": str(root / "survey"), "filter": "", "output_folder": str(root / "survey" / "calibrated"),
+               "survey": {"folder": "", "folder_relative": "survey", "filter": "",
+                          "output_folder": "", "output_folder_relative": "calibrated",
                           "copy_metadata": True, "skip_existing": False}}
     (out / "demo.calib.json").write_text(json.dumps(project, indent=2), encoding="utf-8")
+    (out / "README.txt").write_text(README_TXT, encoding="utf-8")
+
+
+README_TXT = """Demo flight for the Thermal Calibration Tool
+https://github.com/haystack-imaging/thermal-calibration-tool
+
+Nothing in this folder is real data. The field, the reference panels and the camera are simulated, and
+the camera drifts in a known way, so you can see the tool take the drift out.
+
+How to try it:
+1. Open demo.calib.json (desktop app: Open, then Open project; Python tool: File, Open project).
+   The panels are drawn and the thermometer readings are typed in already.
+2. Look at the fits in 2 Targets, then go to 3 Process and press Run.
+   The calibrated images go into the folder "calibrated" next to this file.
+
+calibration/       the two shots over the reference panels, at the start and at the end of the flight
+survey/            the survey images
+field_sheet.csv    the panel readings of the handheld IR thermometer
+ground_truth.json  the camera's true gain and offset at every image, to check the results against
+"""
 
 
 # ----------------------------------------------------------------------------------------------- main
@@ -687,6 +712,7 @@ def main(argv=None):
     ap.add_argument("--only", choices=("calibration", "survey"), help="render one kind only (for previews)")
     ap.add_argument("--limit", type=int, default=0, help="render at most N survey images (for previews)")
     ap.add_argument("--pick", default="", help="render only these survey images, e.g. 1,20,33 (for previews)")
+    ap.add_argument("--every", type=int, default=1, help="keep every Nth survey image (1st, N+1th, ...), for a smaller flight")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1, help="parallel worker processes")
     args = ap.parse_args(argv)
 
@@ -724,6 +750,8 @@ def main(argv=None):
             if args.limit and n_survey > args.limit:
                 continue
             if args.pick and n_survey not in {int(v) for v in args.pick.split(",")}:
+                continue
+            if args.every > 1 and (n_survey - 1) % args.every:
                 continue
         when = T0 + timedelta(seconds=round(minute * 60))
         key = "survey" if kind == "survey" else ("start" if minute == 0 else "end")
@@ -779,7 +807,7 @@ def main(argv=None):
         w.writerows(sheet)
     if shot_cfg:
         cfg = {"title": "Demo flight (synthetic)", "calibration": shot_cfg, "survey_folder": str(out / "survey"),
-               "output_folder": str(out / "survey" / "calibrated"), "loupe_target": 2,
+               "output_folder": str(out / "calibrated"), "loupe_target": 2,
                "view": {"scale": 1.3, "center": [320, 256]}}
         ox, oy, _ = OPERATOR["start"]
         start_pose = next(p for k, m, p in shots if k == "calibration")

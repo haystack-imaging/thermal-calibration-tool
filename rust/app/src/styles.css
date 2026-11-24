@@ -100,6 +100,13 @@ input, select { font: inherit; color: var(--text); }
 .btn.small { padding: 2px 8px; font-size: 12px; }
 .btn.accent.small { padding: 1px 8px; }
 
+/* the Open menu in the top bar */
+.menu-wrap { position: relative; display: inline-block; }
+.menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 15; min-width: 240px; background: var(--panel); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); padding: 4px 0; }
+.menu button { display: flex; width: 100%; gap: 16px; justify-content: space-between; align-items: baseline; border: 0; background: none; color: var(--text); padding: 7px 14px; text-align: left; cursor: pointer; font: inherit; }
+.menu button:hover, .menu button:focus-visible { background: var(--bg-muted); outline: none; }
+.menu .kbd { color: var(--muted); font-size: 12px; }
+
 /* body */
 #body { display: flex; flex: 1; min-height: 0; }
 #rail { width: var(--rail-w); flex: none; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; }

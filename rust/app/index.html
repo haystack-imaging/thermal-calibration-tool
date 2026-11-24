@@ -17,7 +17,13 @@
         <button id="btn-undo" class="btn" disabled>↶ Undo</button>
         <button id="btn-redo" class="btn" disabled>↷ Redo</button>
         <button id="btn-new" class="btn">New</button>
-        <button id="btn-open" class="btn">Open…</button>
+        <span class="menu-wrap">
+          <button id="btn-open" class="btn" aria-haspopup="menu" aria-expanded="false">Open ▾</button>
+          <div id="open-menu" class="menu" role="menu" hidden>
+            <button id="btn-open-project" role="menuitem">Open project…<span class="kbd">Ctrl+O</span></button>
+            <button id="btn-open-demo" role="menuitem">Open demo flight<span class="kbd">no drone needed</span></button>
+          </div>
+        </span>
         <button id="btn-save" class="btn">Save</button>
         <button id="btn-save-as" class="btn">Save as…</button>
         <button id="btn-help" class="btn">Help</button>

@@ -16,3 +16,6 @@ rust/app/node_modules/
 rust/app/dist/
 rust/app/src-tauri/target/
 rust/app/src-tauri/gen/schemas/
+
+# the demo flight bundled with the app (generated, see rust/app/src-tauri/resources/README.md)
+rust/app/src-tauri/resources/demo-flight/

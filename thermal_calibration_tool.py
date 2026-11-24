@@ -1145,9 +1145,11 @@ def run_batch(job: BatchJob, log: Callable[[str], None], progress: Callable[[int
             project_path = out_dir / project_filename(job.project)
             copy = dict(job.project)
             copy["calibration_images"] = [e.to_dict(str(out_dir.resolve())) for e in fitted]
-            copy["survey"] = dict(copy.get("survey", {}),
-                                  folder=str(job.survey_files[0].parent.resolve()) if job.survey_files else copy.get("survey", {}).get("folder", ""),
-                                  output_folder=str(out_dir.resolve()))
+            copy["survey"] = survey_with_relative_folders(
+                dict(copy.get("survey", {}),
+                     folder=str(job.survey_files[0].parent.resolve()) if job.survey_files else copy.get("survey", {}).get("folder", ""),
+                     output_folder=str(out_dir.resolve())),
+                str(out_dir.resolve()))
             with open(project_path, 'w', encoding='utf-8') as f:
                 json.dump(copy, f, indent=2)
         except OSError as e:
@@ -1315,7 +1317,42 @@ def events_to_project(events: List[CalibrationEvent], mode: str, single_point: b
     return {"tool": "thermal_calibration_tool", "version": __version__, "saved": datetime.now().isoformat(),
             "title": title, "mode": mode, "msi_single_point": single_point, "roi_inset_px": roi_inset_px,
             "emissivity": emissivity.to_dict(),
-            "calibration_images": [e.to_dict(project_dir) for e in events], "survey": survey or {}}
+            "calibration_images": [e.to_dict(project_dir) for e in events],
+            "survey": survey_with_relative_folders(survey or {}, project_dir)}
+
+
+def survey_with_relative_folders(survey: dict, project_dir: Optional[str]) -> dict:
+    """The survey settings with `folder_relative` and `output_folder_relative` (relative to the project
+    folder, with "/"), so a folder that moves as a whole with its project still opens."""
+    sv = dict(survey or {})
+    if project_dir:
+        for key in ("folder", "output_folder"):
+            rel = None
+            if sv.get(key):
+                try:
+                    rel = os.path.relpath(os.path.abspath(sv[key]), project_dir).replace(os.sep, "/")
+                except ValueError:          # another drive on Windows
+                    rel = None
+            if rel:
+                sv[key + "_relative"] = rel
+            else:
+                sv.pop(key + "_relative", None)
+    return sv
+
+
+def resolve_survey_folders(survey: dict, project_dir: Optional[str]) -> dict:
+    """The survey settings after the project moved: when the stored survey folder does not exist but the
+    one relative to the project folder does, both folders are taken relative to the project folder."""
+    sv = dict(survey or {})
+    rel = (sv.get("folder_relative") or "").replace("\\", "/")
+    if project_dir and rel and not os.path.isdir(sv.get("folder") or ""):
+        alt = os.path.normpath(os.path.join(project_dir, rel))
+        if os.path.isdir(alt):
+            sv["folder"] = alt
+            out_rel = (sv.get("output_folder_relative") or "").replace("\\", "/")
+            if out_rel:
+                sv["output_folder"] = os.path.normpath(os.path.join(project_dir, out_rel))
+    return sv
 
 
 def events_from_project(project: dict, project_dir: Optional[str], roi_inset_px: int) -> Tuple[List[CalibrationEvent], List[str]]:
@@ -1366,7 +1403,7 @@ def run_project_headless(project_path: str, survey_folder: Optional[str] = None,
         warn = recompute_fit(e, single, mode == MODE_THERMAL, em)
         if warn:
             log(f"WARNING: {os.path.basename(e.image_path)}: {warn}")
-    sv = project.get("survey", {})
+    sv = resolve_survey_folders(project.get("survey", {}), os.path.dirname(os.path.abspath(project_path)))
     folder = survey_folder or sv.get("folder") or (os.path.dirname(sv["files"][0]) if sv.get("files") else None)
     files = collect_survey_files(folder, None,
                                  name_filter if name_filter is not None else sv.get("filter", ""),
@@ -3864,7 +3901,7 @@ class ThermalCalibrationApp:
         self.emis_target_var.set(f"{em.target_emissivity:g}")
         self.emis_scene_var.set(f"{em.scene_emissivity:g}")
         self.tsky_var.set(f"{em.sky_temperature:g}")
-        sv = project.get("survey", {})
+        sv = resolve_survey_folders(project.get("survey", {}), os.path.dirname(os.path.abspath(path)))
         folder = sv.get("folder") or (os.path.dirname(sv["files"][0]) if sv.get("files") else "")
         self.survey_entry.delete(0, tk.END)
         self.survey_entry.insert(0, folder)

@@ -125,7 +125,7 @@ function openStepAction(n: Step): Guide["action"] {
 function guideImages(): Guide {
   const n = state?.events.length ?? 0;
   const files = state?.settings.mode === "thermal" ? "Single-band temperature TIFFs; convert DJI R-JPEGs first (see README)." : "Single-band images of the band you calibrate, one band at a time.";
-  if (n === 0) return { head: "Choose the sensor type, then press Add images… and pick the shots that show your reference targets.", detail: files + " Usually one shot before and one after the survey." };
+  if (n === 0) return { head: "Choose the sensor type, then press Add images… and pick the shots that show your reference targets.", detail: files + " Usually one shot before and one after the survey. No drone images at hand? The demo flight is a synthetic flight with the panels already drawn.", action: { label: "Open the demo flight ›", run: () => void openDemoFlight() } };
   if (n === 1) return { head: "1 shot loaded. Add the other calibration shots of this flight (e.g. the one taken after the survey), then open 2 · Targets.", detail: "One shot is enough for a flight; a second one at the end also corrects drift. Shots are sorted by capture time.", action: openStepAction(2) };
   return { head: `${n} shots loaded. Add any further calibration shots of this flight, then open 2 · Targets.`, detail: "Shots are sorted by capture time; the coefficients are interpolated between them during the flight.", action: openStepAction(2) };
 }
@@ -1007,11 +1007,7 @@ $("#btn-new").addEventListener("click", async () => {
   showStep(1);
   status("New project.");
 });
-$("#btn-open").addEventListener("click", async () => {
-  const p = await pick("open", pickProjectToOpen, null);
-  if (!p) return;
-  imageCache.clear();
-  const r = await call<{ problems: string[]; state: AppState }>("open_project", { path: p });
+async function afterOpen(r: { problems: string[]; state: AppState } | null, message: (s: AppState) => string) {
   if (!r) return;
   const s = r.state;
   applyState(s);
@@ -1021,8 +1017,48 @@ $("#btn-open").addEventListener("click", async () => {
   pending = [];
   await selectShot(0);
   showStep(s.events.length ? 2 : 1);
-  status(`Project opened: ${s.events.length} calibration image(s).`);
+  status(message(s));
+}
+async function openProjectFile() {
+  closeOpenMenu();
+  const p = await pick("open", pickProjectToOpen, null);
+  if (!p) return;
+  imageCache.clear();
+  const r = await call<{ problems: string[]; state: AppState }>("open_project", { path: p });
+  await afterOpen(r, (s) => `Project opened: ${s.events.length} calibration image(s).`);
+}
+/** The synthetic demo flight that comes with the app: panels drawn, readings typed in, ready to run. */
+async function openDemoFlight() {
+  closeOpenMenu();
+  if (state?.events.length && !(await alert("Open the demo flight", "Discard the current targets and fits?", [{ label: "Cancel", value: false }, { label: "Discard", accent: true, value: true }]))) return;
+  cancelDrawing(true);
+  imageCache.clear();
+  status("Opening the demo flight…");
+  const r = await call<{ problems: string[]; state: AppState }>("open_demo_flight");
+  await afterOpen(r, () => "Demo flight opened. The panels are drawn and the readings typed in: check the fits, then press Run in 3 · Process.");
+}
+const openMenu = $("#open-menu");
+function closeOpenMenu() {
+  openMenu.hidden = true;
+  $("#btn-open").setAttribute("aria-expanded", "false");
+}
+$("#btn-open").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openMenu.hidden = !openMenu.hidden;
+  $("#btn-open").setAttribute("aria-expanded", String(!openMenu.hidden));
+  if (!openMenu.hidden) $<HTMLButtonElement>("#btn-open-project").focus();
 });
+$("#btn-open-project").addEventListener("click", () => void openProjectFile());
+$("#btn-open-demo").addEventListener("click", () => void openDemoFlight());
+document.addEventListener("click", (e) => {
+  if (!openMenu.hidden && !(e.target as HTMLElement).closest(".menu-wrap")) closeOpenMenu();
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !openMenu.hidden) {
+    e.stopPropagation();
+    closeOpenMenu();
+  }
+}, true);
 async function save(as: boolean) {
   if (!state) return;
   let path: string | null = as ? null : state.project_path;
@@ -1050,7 +1086,7 @@ window.addEventListener("keydown", (e) => {
     void save(e.shiftKey);
   } else if (ctrl && key === "o") {
     e.preventDefault();
-    $("#btn-open").click();
+    void openProjectFile();
   } else if (ctrl && key === "z" && !e.shiftKey) {
     e.preventDefault();
     if (drawing) {

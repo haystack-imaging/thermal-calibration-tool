@@ -357,6 +357,8 @@ export async function mockInvoke(cmd: string, args: Record<string, unknown>): Pr
       state.project_path = a.path as string;
       return { problems: [], state: stateDto() };
     }
+    case "open_demo_flight":
+      throw new Error("The demo flight comes with the desktop app; the browser preview has no files to open.");
     case "new_project":
       state = { ...state, title: "untitled project", project_path: null, shots: [], last_output: null, running: false, survey: { folder: "", output_folder: "", filter: "", copy_metadata: true, skip_existing: false }, settings: { ...state.settings, mode: "thermal", emissivity: { enabled: false, target_emissivity: 0.95, scene_emissivity: 0.98, sky_temperature: -40 }, roi_inset_px: 3 } };
       return stateDto();

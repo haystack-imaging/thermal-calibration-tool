@@ -2,7 +2,9 @@
 
 use crate::batch::{collect_survey_files, preflight, run_batch, BatchJob, BatchResult, Callbacks};
 use crate::fit::recompute_fit;
-use crate::model::{isoformat, CalibrationEvent, CalibrationTarget, EmissivitySettings, Mode};
+use crate::model::{
+    isoformat, relative_path, CalibrationEvent, CalibrationTarget, EmissivitySettings, Mode,
+};
 use crate::raster::load_image;
 use crate::roi::extract_roi_statistics;
 use crate::timestamp::extract_timestamp;
@@ -33,8 +35,77 @@ pub fn events_to_project(
         "roi_inset_px": roi_inset_px,
         "emissivity": emissivity.to_json(),
         "calibration_images": events.iter().map(|e| e.to_json(project_dir)).collect::<Vec<_>>(),
-        "survey": survey.unwrap_or_else(|| json!({})),
+        "survey": survey_with_relative_folders(survey.unwrap_or_else(|| json!({})), project_dir),
     })
+}
+
+/// The survey settings with `folder_relative` and `output_folder_relative` (relative to the project
+/// folder, with "/"), so a folder that moves as a whole with its project still opens.
+pub fn survey_with_relative_folders(mut survey: Value, project_dir: Option<&Path>) -> Value {
+    let (Some(dir), Some(obj)) = (project_dir, survey.as_object_mut()) else {
+        return survey;
+    };
+    for key in ["folder", "output_folder"] {
+        let rel_key = format!("{key}_relative");
+        let rel = obj
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .and_then(|s| relative_path(Path::new(s), dir));
+        match rel {
+            Some(r) => {
+                obj.insert(rel_key, Value::String(r));
+            }
+            None => {
+                obj.remove(&rel_key);
+            }
+        }
+    }
+    survey
+}
+
+/// `rel` ("/" or "\\" separated) below `dir`, with "." and ".." resolved.
+fn join_relative(dir: &Path, rel: &str) -> PathBuf {
+    let mut p = dir.to_path_buf();
+    for part in rel
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty() && *s != ".")
+    {
+        if part == ".." {
+            p.pop();
+        } else {
+            p.push(part);
+        }
+    }
+    p
+}
+
+/// The survey settings after the project moved: when the stored survey folder does not exist but the
+/// one relative to the project folder does, both folders are taken relative to the project folder.
+pub fn resolve_survey_folders(survey: &Value, project_dir: Option<&Path>) -> Value {
+    let mut sv = survey.clone();
+    let get = |k: &str| {
+        survey
+            .get(k)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let (folder, rel) = (get("folder"), get("folder_relative"));
+    if let Some(dir) = project_dir {
+        if !rel.is_empty() && (folder.is_empty() || !Path::new(&folder).is_dir()) {
+            let alt = join_relative(dir, &rel);
+            if alt.is_dir() {
+                sv["folder"] = Value::String(alt.to_string_lossy().to_string());
+                let out_rel = get("output_folder_relative");
+                if !out_rel.is_empty() {
+                    sv["output_folder"] =
+                        Value::String(join_relative(dir, &out_rel).to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    sv
 }
 
 /// `<title>.calib.json`, the file name a project is saved under next to the outputs.
@@ -174,7 +245,10 @@ pub fn load_project_job(
             fit_warnings.push((e.file_name(), w));
         }
     }
-    let sv = project.get("survey").cloned().unwrap_or_else(|| json!({}));
+    let sv = resolve_survey_folders(
+        &project.get("survey").cloned().unwrap_or_else(|| json!({})),
+        project_dir.as_deref(),
+    );
     let folder: Option<PathBuf> = survey_folder
         .map(Path::to_path_buf)
         .or_else(|| {
@@ -268,6 +342,36 @@ pub fn run_project_headless(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn survey_folders_move_with_the_project() {
+        let dir = std::env::temp_dir().join(format!("thermal_core_moved_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("survey")).unwrap();
+        let saved = survey_with_relative_folders(
+            json!({"folder": dir.join("survey").to_string_lossy(), "output_folder": dir.join("calibrated").to_string_lossy()}),
+            Some(&dir),
+        );
+        assert_eq!(saved["folder_relative"], "survey");
+        assert_eq!(saved["output_folder_relative"], "calibrated");
+        // the folder was made on another computer: its absolute paths do not exist here
+        let moved = json!({"folder": "/nonexistent/flight/survey", "folder_relative": "survey",
+                           "output_folder": "/nonexistent/flight/calibrated", "output_folder_relative": "calibrated"});
+        let sv = resolve_survey_folders(&moved, Some(&dir));
+        assert_eq!(
+            sv["folder"].as_str().unwrap(),
+            dir.join("survey").to_string_lossy()
+        );
+        assert_eq!(
+            sv["output_folder"].as_str().unwrap(),
+            dir.join("calibrated").to_string_lossy()
+        );
+        // an existing absolute folder wins, and nothing changes without a project folder
+        let here = json!({"folder": dir.to_string_lossy(), "folder_relative": "survey", "output_folder": "/x", "output_folder_relative": "calibrated"});
+        assert_eq!(resolve_survey_folders(&here, Some(&dir)), here);
+        assert_eq!(resolve_survey_folders(&moved, None), moved);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn project_file_names_are_safe() {

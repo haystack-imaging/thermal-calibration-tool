@@ -310,6 +310,33 @@ await e2e.until(() => app().activeStep() === 1);
 await e2e.report("new project clears everything", state().events.length === 0 && (state().title === "" || state().title === "untitled project") && !state().project_path, { title: state().title, step: app().activeStep() });
 e2e.pickProjectToOpen = async () => env.project;
 e2e.click("#btn-open");
+await e2e.until(() => !e2e.$("#open-menu").hidden);
+await e2e.report("Open shows a menu: project or demo flight", /Open project/.test(e2e.$("#open-menu").textContent) && /Open demo flight/.test(e2e.$("#open-menu").textContent));
+e2e.click("#btn-open-project");
 await e2e.until(() => state().events.length === 3 && app().activeStep() === 2 && app().viewer.image);
-await e2e.report("project reopened with fits and names", state().events.every((e) => e.fit && e.targets[0].name === "black") && state().title === "golden flight", { title: state().title, names: state().events.map((e) => e.targets[0].name), fits: state().events.map((e) => !!e.fit) });
+await e2e.report("project reopened with fits and names", state().events.every((e) => e.fit && e.targets[0].name === "black") && state().title === "golden flight" && e2e.$("#open-menu").hidden, { title: state().title, names: state().events.map((e) => e.targets[0].name), fits: state().events.map((e) => !!e.fit) });
+
+// ---------------------------------------------------------------- the demo flight that comes with the app
+e2e.click("#btn-open");
+await e2e.until(() => !e2e.$("#open-menu").hidden);
+e2e.click("#btn-open-demo");
+await e2e.until(() => !document.querySelector("#modal").hidden); // discard the open project?
+e2e.click("#modal button.accent");
+if (env.demo) {
+  await e2e.until(() => state().title === "Demo flight (synthetic)" && state().events.length === 2 && app().viewer.image, 60000);
+  const s = state();
+  await e2e.report("the demo flight opens with the panels drawn and the readings typed in", app().activeStep() === 2 && s.events.every((e) => e.fit && e.targets.length === 3 && e.targets.every((t) => t.polygon.length === 4 && t.ground_truth !== null)), { names: s.events.map((e) => e.file_name) });
+  await e2e.report("its folders are those of the copy in the app's data folder", /demo-flight[\\/]survey$/.test(s.survey.folder) && /demo-flight[\\/]calibrated$/.test(s.survey.output_folder), s.survey);
+  await app().showStep(3);
+  await e2e.until(() => app().preflight() && app().preflight().files.length === 14, 30000);
+  e2e.click("#btn-run");
+  await e2e.wait(300);
+  if (!document.querySelector("#modal").hidden) e2e.click("#modal button.accent");
+  await e2e.until(() => state().last_output && app().rows().length === 14, 120000);
+  await e2e.report("the demo flight runs: 14 calibrated images", app().rows().every((r) => r.status === "ok") && /demo-flight[\\/]calibrated$/.test(state().last_output), { out: state().last_output, rows: app().rows().map((r) => r.status) });
+} else {
+  await e2e.until(() => !document.querySelector("#modal").hidden && /no demo flight/.test(e2e.$("#modal").textContent));
+  await e2e.report("a build without the demo flight says where to get it", /demo-flight\.zip/.test(e2e.$("#modal").textContent));
+  e2e.click("#modal button");
+}
 await e2e.done(true);

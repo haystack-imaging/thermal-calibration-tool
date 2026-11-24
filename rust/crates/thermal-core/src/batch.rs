@@ -948,7 +948,7 @@ pub fn run_batch(
             );
         }
         survey["output_folder"] = Value::String(out_abs.to_string_lossy().to_string());
-        copy["survey"] = survey;
+        copy["survey"] = crate::project::survey_with_relative_folders(survey, Some(&out_abs));
         match fs::write(&path, serde_json::to_string_pretty(&copy)?) {
             Ok(()) => project_path = Some(path),
             Err(e) => (cb.log)(&format!(

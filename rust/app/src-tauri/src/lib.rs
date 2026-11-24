@@ -11,7 +11,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use thermal_core::batch::{collect_survey_files, preflight, run_batch, BatchJob, Callbacks, Row};
 use thermal_core::fit::recompute_fit;
 use thermal_core::model::*;
-use thermal_core::project::{events_from_project, events_to_project, project_filename};
+use thermal_core::project::{
+    events_from_project, events_to_project, project_filename, resolve_survey_folders,
+};
 use thermal_core::raster::{inspect_image, load_image, Raster};
 use thermal_core::roi::{extract_roi_statistics, mask_outlines, order_corners, polygon_mask};
 use thermal_core::timestamp::extract_timestamp;
@@ -948,7 +950,10 @@ fn open_project_into(inner: &mut Inner, path: &str) -> Result<Vec<String>, Strin
         ),
         roi_inset_px: inset,
     };
-    let sv = project.get("survey").cloned().unwrap_or_default();
+    let sv = resolve_survey_folders(
+        &project.get("survey").cloned().unwrap_or_default(),
+        Path::new(path).parent(),
+    );
     let field = |k: &str| sv.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     inner.survey = SurveySettings {
         folder: field("folder"),
@@ -1005,6 +1010,65 @@ fn open_project(path: String, state: Shared) -> Result<OpenResult, String> {
         problems,
         state: state_dto(&mut inner),
     })
+}
+
+/// The demo flight bundled with the app (`resources/demo-flight`, made by demo/make_demo_flight.py):
+/// copied once into the app's data folder, because the installed files are read-only and a run writes
+/// its outputs next to the images, then opened like any project. A newer demo replaces the old copy.
+#[tauri::command]
+fn open_demo_flight(app: AppHandle, state: Shared) -> Result<OpenResult, String> {
+    let src = app
+        .path()
+        .resolve(
+            "resources/demo-flight",
+            tauri::path::BaseDirectory::Resource,
+        )
+        .map_err(|e| e.to_string())?;
+    if !src.join("demo.calib.json").is_file() {
+        return Err("This build of the app has no demo flight. Download demo-flight.zip from \
+                    github.com/haystack-imaging/thermal-calibration-tool/releases, unpack it and open \
+                    demo.calib.json with Open project."
+            .into());
+    }
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dst = data.join("demo-flight");
+    let marker = |dir: &Path| std::fs::read(dir.join("ground_truth.json")).ok();
+    if marker(&dst).is_none() || marker(&dst) != marker(&src) {
+        if dst.exists() && marker(&dst).is_none() {
+            return Err(format!(
+                "{} exists but is not a demo flight. Move it away and try again.",
+                dst.display()
+            ));
+        }
+        // copy next to it first, so an interrupted copy never looks like a complete demo
+        let part = data.join("demo-flight.part");
+        let _ = std::fs::remove_dir_all(&part);
+        copy_dir(&src, &part).map_err(|e| format!("could not copy the demo flight: {e}"))?;
+        if dst.exists() {
+            std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&part, &dst).map_err(|e| e.to_string())?;
+    }
+    let mut inner = lock(&state);
+    let problems = open_project_into(&mut inner, &dst.join("demo.calib.json").to_string_lossy())?;
+    Ok(OpenResult {
+        problems,
+        state: state_dto(&mut inner),
+    })
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1168,6 +1232,7 @@ pub fn run() {
             save_project,
             suggested_project_filename,
             open_project,
+            open_demo_flight,
             new_project,
             open_in_file_manager,
             fit_report_html,

@@ -372,3 +372,19 @@ def test_fit_report_html(tmp_path):
     assert (tmp_path / "r.html").stat().st_size > 1000
     with pytest.raises(ValueError):
         tct.fit_report_html(tct.CalibrationEvent(cal, T0, targets=[]), "°C", [])
+
+
+def test_survey_folders_move_with_the_project(tmp_path):
+    """A project folder that moves as a whole (the demo flight, a copied flight) still finds its survey and
+    output folders: they are stored relative to the project file as well."""
+    (tmp_path / "survey").mkdir()
+    saved = tct.survey_with_relative_folders(
+        {"folder": str(tmp_path / "survey"), "output_folder": str(tmp_path / "calibrated")}, str(tmp_path))
+    assert saved["folder_relative"] == "survey" and saved["output_folder_relative"] == "calibrated"
+    moved = {"folder": "/nonexistent/flight/survey", "folder_relative": "survey",
+             "output_folder": "/nonexistent/flight/calibrated", "output_folder_relative": "calibrated"}
+    sv = tct.resolve_survey_folders(moved, str(tmp_path))
+    assert sv["folder"] == str(tmp_path / "survey") and sv["output_folder"] == str(tmp_path / "calibrated")
+    here = dict(moved, folder=str(tmp_path))           # an existing absolute folder wins
+    assert tct.resolve_survey_folders(here, str(tmp_path)) == here
+    assert tct.resolve_survey_folders(moved, None) == moved

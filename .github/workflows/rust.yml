@@ -2,9 +2,9 @@ name: rust
 
 on:
   push:
-    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", "demo/make_demo_flight.py", ".github/workflows/rust.yml"]
   pull_request:
-    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", ".github/workflows/rust.yml"]
+    paths: ["rust/**", "tests/golden/**", "tests/helpers.py", "demo/make_demo_flight.py", ".github/workflows/rust.yml"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -75,6 +75,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[exif,test]"
           python rust/tools/make_golden_flight.py
+      - name: Demo flight (bundled with the app; the end-to-end flow opens and runs it)
+        run: python demo/make_demo_flight.py rust/app/src-tauri/resources/demo-flight --every 4
       - name: "Front-end: type check, unit tests, bundle"
         working-directory: rust/app
         run: |
