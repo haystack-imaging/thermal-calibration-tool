@@ -39,6 +39,10 @@ python3 tools/make_golden_flight.py   # once, from the repo root's Python enviro
 cargo test                     # now including the comparison with the Python reference
 ```
 
+The app bundles the demo flight behind *Open* → *Open demo flight*. Make it once before building
+(`python ../demo/make_demo_flight.py app/src-tauri/resources/demo-flight --every 4` from `rust/`, see
+`app/src-tauri/resources/README.md`); without it the app builds and the menu entry says where to download it.
+
 The desktop app needs Node 18+ and, on Linux, the WebKitGTK development packages:
 
 ```bash

@@ -3,307 +3,119 @@
 [![tests](https://github.com/haystack-imaging/thermal-calibration-tool/actions/workflows/tests.yml/badge.svg)](https://github.com/haystack-imaging/thermal-calibration-tool/actions/workflows/tests.yml)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
-A small desktop tool that corrects the drift of uncooled thermal drone cameras (built for the DJI Matrice 4T, works with any single-band temperature image) using reference targets measured in the field. It fits the Empirical Line Method, interpolates the correction over the flight, writes 32-bit float GeoTIFFs and tells you how uncertain the result is.
+Uncooled thermal drone cameras drift: the same surface reads differently a few minutes later, and the absolute level is often several degrees off. This tool corrects that with reference panels you measure in the field (Empirical Line Method). It is built for the DJI Matrice 4T and works with any single-band temperature image. You get a calibrated 32-bit float GeoTIFF per image and a log that says how uncertain each one is.
 
-Version 0.3.0 (beta). Python, Tkinter, runs on Windows, macOS and Linux. The science functions are tested against closed-form references and golden data (`tests/README.md`), and the GUI was tested on synthetic flights and real DJI M4T flights.
+![The app with the demo flight open](GUI_screenshots/App_Targets.png)
 
-![Targets step with the live fit panel](GUI_screenshots/GUI_Home.png)
+## Install
 
-The screenshots show the demo flight from `demo/make_demo_flight.py`: a synthetic wheat trial, a simulated DJI Matrice 4T thermal camera with a known drift, and three reference panels (black, grey, white) read with an IR thermometer at the start and the end of the flight. You can make the same flight on your computer, see [Try it without a drone](#try-it-without-a-drone).
+Download the installer for your system from the [latest release](https://github.com/haystack-imaging/thermal-calibration-tool/releases/latest):
 
-## Why
+| System | File | First start |
+|--------|------|-------------|
+| Windows 10 or 11 | `…_x64-setup.exe` (or the `.msi`) | Windows warns about an unknown publisher: *More info*, then *Run anyway* |
+| macOS (Apple silicon and Intel) | `…_universal.dmg` | Drag the app into *Applications*. macOS blocks the first start: open *System Settings* → *Privacy & Security* and click *Open Anyway* |
+| Linux | `….AppImage` (make it executable, then run it), or the `.deb` / `.rpm` package | |
 
-Uncooled microbolometer sensors drift: the same surface reads differently a few minutes later, and the absolute level is often off by several degrees. The tool corrects this with reference measurements:
+The installers are not signed, which is why Windows and macOS ask once. GitHub builds them from the tagged source with the public workflow `.github/workflows/release-app.yml`, and `SHA256SUMS.txt` in the release has their checksums. If you have doubts about running an unsigned program, the source code is open and public: you can read it and build the app yourself (see [rust/README.md](rust/README.md#building)), or use the [Python version](#the-python-version).
 
-1. Put 2 to 4 targets of different temperature in the scene (e.g. a wet panel, a grey panel, a black panel) and photograph them with the drone.
-2. Measure each target with an IR thermometer at the same moment.
-3. The tool fits `T_corrected = m × T_drone + b` from the targets.
-4. Every survey image is corrected with `m` and `b`. With calibration shots at the start and the end of the flight (or more), `m` and `b` are interpolated in time, so drift during the flight is corrected too.
+## Try it with the demo flight
 
-One calibration shot is enough; it then applies one constant correction to the whole flight. If you only take the reference shot at the end of the flight, that is fine.
+In the app, click *Open* → *Open demo flight*. The demo flight is synthetic: a wheat trial with three reference panels, flown by a simulated M4T whose readings drift by about 3 °C during the flight. The panels are drawn and the thermometer readings are typed in already. Look at the fits in step 2, then press *Run* in step 3. *Open output folder* shows the calibrated images.
 
-## Features
+The same flight is attached to every release as `demo-flight.zip`, for the Python version or to look at the files. Unpack it and open `demo.calib.json`. `ground_truth.json` in it has the camera's real gain and offset for every image, so you can check the tool's numbers against them.
 
-- Any number of calibration images; coefficients interpolated between all of them (start, mid, end).
-- Three-step layout (Images, Targets, Process) with a flight timeline, a live fit panel and a Settings section.
-- Zoomable image (wheel), pan (right drag), loupe while placing corners, cursor readout, colour bar, Inferno / grey / CLAHE display.
-- Targets are defined by 4-corner polygons; a fixed pixel inset (default 3 px) removes the blurred edge before the mean is taken, and the region actually used is drawn dashed.
-- Fit diagnostics: R², RMSE, standard errors of m and b, leave-one-out error, residual bars, ±1σ prediction band, extrapolation warning; HTML fit report export.
-- Per-image prediction uncertainty of the fit in the processing log, and where each image lies relative to the calibration shots.
-- Pre-flight check before the batch: file types, capture-time sources, images outside the calibration window, overwrites.
-- Batch runs in the background with a Cancel button; outputs keep georeferencing and (with exiftool) the full EXIF/XMP/GPS block, so Metashape, Pix4D and ODM keep camera positions and times.
-- Project files (`*.calib.json`) save polygons, readings and settings; a project can be re-run headless from the command line.
-- Multispectral mode: single-band DN → reflectance with one panel (K = ρ/DN) or several (empirical line).
-- Comma or dot decimals, 0.0 °C is a valid reference, colour previews are refused instead of silently processed.
+## How it works
 
-## Installation
+1. Lay out two to four panels of clearly different temperature, for example a wet one, a grey one and a black one, and photograph them with the drone at the start and at the end of the flight.
+2. Measure each panel with an IR thermometer at the same time.
+3. The tool fits `T = m × T_drone + b` for each calibration shot and interpolates m and b over the flight (in a straight line between two shots, constant before the first and after the last), so the drift during the flight is corrected too.
 
-The repository used to be at `github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets`, and that address forwards here. Its history was rebuilt for the move, so `git pull` fails on copies made before it. Please clone it again.
+One calibration shot also works. It then applies one constant correction to the whole flight, and it can be taken at the end.
 
-**The desktop app:** the [latest release](https://github.com/haystack-imaging/thermal-calibration-tool/releases/latest) has installers for the desktop app, the Rust version of this tool (see [Desktop app](#desktop-app-rust)). It needs no Python.
+## Using the app
 
-| System  | File | First start |
-|---------|------|-------------|
-| Windows 10 or 11 | `…_x64-setup.exe` or `…_x64_en-US.msi` | Windows warns about an unknown publisher: *More info* → *Run anyway* |
-| macOS (Apple silicon and Intel) | `…_universal.dmg` | Drag the app into *Applications*. macOS blocks it the first time: open *System Settings* → *Privacy & Security* and click *Open Anyway* |
-| Linux   | `….AppImage` (make it executable, then run it), or the `.deb` / `.rpm` package | |
+The app has three steps on the left. A NEXT card at the top of each step says what to do next.
 
-The installers are not signed, which is why Windows and macOS ask once. GitHub builds them from the tagged source with the public workflow `.github/workflows/release-app.yml`, and `SHA256SUMS.txt` in the release has their checksums. If you have doubts about running an unsigned program, the source code is open and public: you can read it and build the app on your own computer (see [Building](rust/README.md#building)), or run the Python tool from source as described below.
+1. Images: choose thermal or multispectral, then add the calibration shots (the images that show the panels).
+2. Targets: click the corners of each panel on the image and type the thermometer reading. Do this on every shot. The fit panel on the right updates with every reading.
+3. Process: choose the folder with the survey images and an output folder, read the pre-flight list and press *Run*.
 
-**The Python tool, the easy way:** download the code (green *Code* button → *Download ZIP*, or `git clone`), unpack it and
-double-click the launcher for your system. It installs what is missing the first time (a few minutes, into a
-private `.venv` folder), keeps it current afterwards and starts the tool; later double-clicks just start it.
+The mouse wheel zooms, right-drag pans and Ctrl+Z undoes. *Settings* below the steps holds the edge inset of the panels (default 3 px), the emissivity correction and the metadata options. *Inspect* opens any image, or the results after a run, to read values and measure areas.
 
-| System  | Double-click | Needs |
-|---------|--------------|-------|
-| Windows | `Launch.bat` | Python 3.10+ from [python.org](https://www.python.org/downloads/) (tick *Add python.exe to PATH*) |
-| macOS   | `Launch.command` (first time after a download: right-click → *Open*) | Python 3.10+ from python.org |
-| Linux   | `Launch.sh` (GNOME Files: right-click → *Run as a Program*, or `./Launch.sh`) | `python3`, `python3-tk`, `python3-venv` |
+## Your own images
 
-The launcher is `launch.py`; `python3 launch.py --update` upgrades the packages, `--no-update` skips the
-`git pull` it does on a clean checkout, and tool arguments pass through (`python3 launch.py --project
-flight.calib.json --run`).
-
-**By hand:** Python 3.10 or newer. Tkinter ships with Python on Windows and macOS; on Linux install it with your package manager (`python3-tk` on Debian/Ubuntu, `python3-tkinter` on Fedora).
-
-Run it from the checkout:
-
-```bash
-pip install -r requirements.txt
-python thermal_calibration_tool.py
-```
-
-Or install it as a package, which adds the `thermal-calibration-tool` command (the `exif` extra reads capture times from JPEG/TIFF EXIF headers, the `test` extra pulls in pytest):
-
-```bash
-pip install ".[exif]"
-thermal-calibration-tool
-```
-
-`exiftool` is optional. If it is on the PATH, EXIF/XMP/GPS metadata is copied to the outputs; without it only GDAL tags (capture time, georeferencing) survive.
-
-## Input: temperature images, not R-JPEGs
-
-The tool needs **single-band images whose pixel values are temperatures** (or digital numbers in multispectral mode), typically 32-bit float TIFFs. DJI cameras save radiometric JPEGs (`*_T.JPG`): a colour preview with the raw thermal data embedded. The colour preview is *not* a temperature image, and the tool refuses it. Convert R-JPEGs first with the DJI Thermal SDK, for example through the [thermal_parser](https://github.com/SanNianYiSi/thermal_parser) wrapper; `tests/convert_rjpeg.py` in this repository is a working example that also copies the EXIF/XMP block to the TIFF:
+The tool needs single-band images whose pixel values are temperatures, usually 32-bit float TIFFs. DJI cameras save radiometric JPEGs (`*_T.JPG`): a colour preview with the raw data hidden inside. The preview is not a temperature image, and the tool refuses it. Convert the R-JPEGs first with the DJI Thermal SDK, for example through the [thermal_parser](https://github.com/SanNianYiSi/thermal_parser) wrapper. `tests/convert_rjpeg.py` in this repository does that and copies the EXIF/XMP block as well:
 
 ```bash
 python tests/convert_rjpeg.py path/to/rjpegs path/to/tifs
 ```
 
-Two things to know about that step:
+The SDK applies its own emissivity (0.95 on the M4T), so leave the tool's emissivity correction off unless you converted with emissivity 1.0. DJI Thermal SDK 1.7 added a fifth field to its parameter struct. Wrappers that still declare four fields (thermal_parser at the time of writing) corrupt memory with it, and `tests/dji_sdk.py` has the fixed struct.
 
-- The SDK applies its own measurement parameters from the R-JPEG (emissivity 0.95, distance 5 m, humidity 50 % on the M4T). Leave the tool's emissivity correction **off** unless you converted with emissivity 1.0.
-- DJI Thermal SDK 1.7 added a fifth field (`ambient_temp`) to its parameter struct. Wrappers that still declare four floats (thermal_parser at the time of writing) corrupt memory with that SDK; `tests/dji_sdk.py` has the corrected struct.
+## In the field
 
-## Try it without a drone
+- Use three panels of clearly different temperature, each at least 10 to 15 px wide in the calibration shot. Fly lower for that shot.
+- The crop is often colder than the coldest panel. A wet panel keeps the crop inside the calibrated range.
+- Measure every panel within a minute of the drone shot. Write down the time and the thermometer's emissivity setting.
+- Take a second calibration shot at the end of the flight. One in the middle helps too.
+- Keep the camera clock right, because the capture times drive the interpolation.
 
-`demo/make_demo_flight.py` makes a complete thermal flight on your computer. Nothing in it is real data.
-The field is a wheat trial with 48 plots (irrigated on the west half, rainfed on the east half), bare soil
-alleys and a mown headland with three reference panels, the operator with the thermometer, a car on the
-track and a row of trees with their shadows. A simulated Matrice 4T (640 × 512, 45° field of view, blur,
-vignetting, fixed-pattern noise, shutter steps) takes two low shots over the panels, one at the start and
-one at the end, and 55 survey images from 35 m in between. Its gain and offset drift by about 3 °C over the
-flight, as an uncooled camera does after take-off. The generator writes all of these numbers down, so you
-can check the tool's results against them.
-
-```bash
-python demo/make_demo_flight.py            # takes a few minutes, writes demo/flight/
-```
-
-| File in `demo/flight/` | Content |
-|------------------------|---------|
-| `calibration/`, `survey/` | float32 temperature TIFFs; with exiftool also DJI-style capture times, GPS and gimbal angles in EXIF/XMP |
-| `field_sheet.csv` | the thermometer readings of the three panels at both shots |
-| `demo.calib.json` | a project with the panels drawn and the readings typed in: open it with File › Open, then 3 · Process › Run |
-| `ground_truth.json` | the camera's gain and offset at every image, and the panel and plot temperatures |
-
-To learn the tool, add the two shots from `calibration/` as images, draw the panels, type the readings from
-`field_sheet.csv`, choose `survey/` as the survey folder and run. The fitted m and b should be close to
-`expected_m` and `expected_b` in `ground_truth.json`. On the default flight the raw camera is up to 2 °C off,
-and the corrected temperatures stay within about 0.2 to 0.4 °C of the truth. Most of the rest comes from the
-thermometer readings (rounded to 0.1 °C, with a small error of their own) and from the drift, which is not a
-straight line between the two shots. `--seed` makes a different field and readings; `--help` lists all options.
-
-## Workflow
-
-The window has three steps on the left (Images, Targets, Process) and a Settings section below them, the image with a flight timeline in the
-centre and a live fit panel on the right. Each step shows a tick once it is done. The project title in the top
-bar is editable (click it); File and Help are in the menu bar (Ctrl+O opens, Ctrl+S saves).
-
-### 1 · Images
-
-Every step starts with a green **NEXT** card that names the one thing to do next. Choose the **Sensor**
-(thermal or multispectral) first: it decides how images and reference values are read, so it is locked as
-soon as images are loaded (File › New project unlocks it). Then **Add images**: every calibration shot of the
-flight that shows the targets (a file chosen twice is reported, not added again). They are sorted by capture
-time (XMP, EXIF or TIFF tag; the source is shown). One image is fine. When all shots are in, press **Open
-2 · Targets** on the card.
-
-### 2 · Targets
-
-The **NEXT** card names the target to draw on which shot, the reading to type and when to switch shots; the
-row it talks about is highlighted. When every target of every shot is done it asks whether the images show
-more panels (then **+ Add target**) and offers **Open 3 · Process**.
-
-1. **Zoom in** with the mouse wheel until the targets are large; right-drag pans, Fit and 1:1 reset the view.
-2. For each target press **Draw** and click its 4 corners; a loupe in the corner magnifies the pixels under
-   the cursor and the readout next to it shows the value. The row shows the ROI mean, its spread and the
-   number of pixels used; the dashed outline on the image is the region actually used (edge inset, default 3 px, set in **Settings**).
-   Redrawing a target removes its old outline the moment you press Draw; **Esc** cancels and brings it back.
-
-   ![Placing a corner with the loupe](GUI_screenshots/GUI_Drawing_Loupe.png)
-
-3. Type the IR thermometer reading in the **truth** field (comma or dot). The cursor is already there after
-   the fourth corner; **Enter** moves to the next target's field.
-4. Switch shots with ‹ › and repeat. Targets are shared by all shots: **+ Add target** adds it to every
-   shot, × removes it everywhere (the last row stays; **Clear** removes only its polygon on the current shot);
-   only the polygons and readings are per shot. **Copy to other shots** copies
-   polygons when the camera did not move. Double-click a target's ID to name it (black, grey, white …); the
-   name appears on the image, in the guidance and in the processing summary.
-
-### The fit panel
-
-The panel on the right shows the fit of the **selected calibration shot** (its header says which) and updates
-with every reading: a regression plot with the ±1σ prediction band, the other shots' fits as thin dashed
-lines with hollow points (so the drift between shots is visible without switching),
-residual bars per target, m and b with their standard errors, R², leave-one-out error and the ±1σ prediction
-uncertainty at the mean target value. Warnings appear in plain words (two targets, negative slope,
-extrapolation beyond the target span). **Detailed plot** opens a matplotlib window; **Export fit report**
-writes a self-contained HTML report for a methods section. With two targets R² is 1 by construction and no
-scatter can be estimated; three or more give the uncertainty figures.
-
-The timeline under the centre view, visible in every step, shows the calibration shots as diamonds, the
-survey images as ticks (orange
-when outside the calibration window) and the offset b(t) that will be interpolated.
-
-![Flight timeline](GUI_screenshots/GUI_Timeline.png)
-
-![Regression plot](GUI_screenshots/GUI_Regression_Plot.png)
-
-### 3 · Process
-
-1. The **NEXT** card asks for the **survey folder** (every image in it is processed; use the filename filter,
-   e.g. `_T_deg`, to narrow down) and the output folder; the empty results table says the same. The capture times are read in the background, appear on the timeline,
-   the pre-flight check runs by itself and every image is listed in the results table as *not processed*.
-   The pre-flight list says what will happen: how many images, where their capture times come from, how many
-   fall outside the calibration window, which files will be skipped or overwritten. **Check** repeats it.
-
-   ![Pre-flight check](GUI_screenshots/GUI_Batch_Preflight.png)
-
-2. Press **Run** (on the card or above the table). The window stays responsive; **Cancel** stops after the current image; the rows fill in
-   one by one with the same columns as the log.
-
-![Process step](GUI_screenshots/GUI_Batch.png)
-
-### Settings
-
-The unnumbered **Settings** section at the bottom of the rail holds what is rarely touched and saved in the
-project file: the **ROI edge inset** (pixels removed from the polygon edge before the mean, default 3), the
-**emissivity correction** (advanced, off by default, see below), **Copy EXIF/XMP/GPS to outputs** and **Skip
-images whose output already exists**. Its summary line shows the current values.
-
-### Output files
+## What you get
 
 | File | Content |
 |------|---------|
-| `*_calibrated.tif` | 32-bit float GeoTIFF (LZW, floating-point predictor), georeferencing and metadata copied from the source, calibration formula in the tags |
-| `processing_log.csv` | One row per image: capture time and its source, position relative to the calibration shots, m, b, statistics before and after, percentage of pixels outside the target range, uncertainty terms |
-| `processing_summary.txt` | Human-readable summary of events, method and settings (UTF-8) |
-| `<title>.calib.json` | The project as it was run (images, polygons, readings, settings), so the run can be reopened or repeated from the command line |
-
-Earlier outputs (`*_calibrated.tif`) in the input folder are never calibrated again.
+| `*_calibrated.tif` | 32-bit float GeoTIFF with the georeferencing and metadata of the source (all of EXIF/XMP/GPS if [exiftool](https://exiftool.org) is installed, so Metashape, Pix4D and ODM keep the camera positions), and the formula in its tags |
+| `processing_log.csv` | one row per image: capture time and its source, m and b, statistics before and after, the share of pixels outside the panels' temperature range, and `u_fit_1sigma` |
+| `processing_summary.txt` | a readable summary of the shots, the method and the settings |
+| `<title>.calib.json` | the project as it ran, to open it again or repeat the run |
 
 ## Uncertainty
 
-The fit panel and the fit report give the standard regression diagnostics, all of which need at least three targets:
+With three or more panels the fit panel and the HTML fit report show the usual regression figures: RMSE, the standard errors of m and b, R², the leave-one-out error and the ±1σ prediction uncertainty `s·√(1 + 1/n + (x−x̄)²/Sxx)`. With three panels that last one has a single degree of freedom, so read it as an order of magnitude and not as a confidence interval. The log gives it for every image as `u_fit_1sigma`, from the calibration shot or shots applied to that image.
 
-- RMSE `√(SSE/n)`, a descriptive number; the residual standard error `s = √(SSE/(n−2))` is the one the standard errors are built from.
-- Standard errors of m and b, R², and the leave-one-out error (refit without each target, predict it).
-- The ±1σ prediction uncertainty of a corrected value, `s·√(1 + 1/n + (x−x̄)²/Sxx)`. With three targets this has one degree of freedom, so a 68 % interval is about 1.8 times wider than the 1σ figure (1.3 times with four targets); read it as an order of magnitude, not a confidence interval.
+This covers the regression only. The thermometer's own error, drift between two shots, emissivity differences between panels and crop and the atmosphere are not in it.
 
-Each row of `processing_log.csv` carries that prediction uncertainty evaluated at the image's mean sensor value (`u_fit_1sigma`), from the calibration shot(s) actually applied to that image: between two shots the larger of the two is reported, before the first or after the last only that shot counts. `position_vs_calibration` says whether the image lies before, between or after the shots, and `pct_pixels_outside_target_range` how much of it is extrapolated beyond the temperature span of the applied targets; the canopy is often colder than the coldest panel, so choose a cold target (a wet surface) deliberately.
+## Emissivity correction (usually off)
 
-This covers the regression only. Not included: the accuracy of the reference thermometer, drift between calibration shots, emissivity mismatch between targets and scene, atmospheric path, spatial non-uniformity of the sensor.
-
-## Project files and the command line
-
-**File → Save project** (Ctrl+S) writes a `*.calib.json` with the images, polygons, readings and settings, plus a record of the fitted coefficients and ROI statistics for the reader. Image paths are stored absolute and relative to the project file, so a flight folder that moves as a whole still opens. Re-open it later, or run it without the GUI:
-
-```bash
-python thermal_calibration_tool.py --project flight.calib.json --run
-python thermal_calibration_tool.py --project flight.calib.json --run --survey /data/flight2 --output /data/flight2/calibrated
-thermal-calibration-tool --version
-```
-
-The headless run performs the same pre-flight check and writes the same files. Pixels marked nodata in the input (or NaN) stay nodata in the output; the output GeoTIFF declares NaN as its nodata value, so GIS software ignores them.
-
-## Emissivity correction (advanced, usually off)
-
-Switched on in **Settings** at the bottom of the rail. The empirical line already absorbs the panels' emissivity, and the DJI SDK applies an emissivity when converting R-JPEGs (0.95 on the M4T). Enable the correction only if your images are apparent temperatures (converted with ε = 1.0). Sensor drift acts on what the sensor sees, so the correction works in apparent-temperature space: the reference readings are converted to the apparent temperature of each panel (its true temperature through the panel emissivity), the fit maps raw sensor values to those, m and b are applied to the raw survey pixels, and the result is converted to surface temperature with the scene emissivity (vegetation about 0.97 to 0.99). Broadband grey-body approximation:
-
-```
-T_app⁴ = ε · T_obj⁴ + (1 − ε) · T_sky⁴
-```
-
-Images converted at ε 0.95 of a scene whose true emissivity is 0.98 read about 1.3 to 1.6 °C too warm under a clear sky. The calibration cannot remove this, because the panels and the thermometer sit at 0.95 as well. If that matters for your question, convert with ε 1.0 and use this correction.
+Switch it on only for images converted at emissivity 1.0 (apparent temperatures). The tool then turns the readings into apparent panel temperatures with the panel emissivity, fits, applies m and b to the raw pixels and converts the result with the scene emissivity (crops about 0.97 to 0.99), using `T_app⁴ = ε·T_obj⁴ + (1−ε)·T_sky⁴`. Images converted at 0.95 of a crop at 0.98 read about 1.3 to 1.6 °C too warm under a clear sky. The calibration cannot remove that, because the panels and the thermometer sit at 0.95 as well.
 
 ## Multispectral mode
 
-Switch **Sensor** to Multispectral for single-band reflectance calibration without an irradiance sensor. Load one band at a time (use the filename filter for the batch). Single-point mode uses one panel (K = ρ/DN); multi-point mode fits ρ = m·DN + b from two or more panels of different reflectance. DN must be comparable between the calibration and survey images (same exposure/gain, or normalised beforehand).
+Choose Multispectral in step 1 to calibrate one band at a time to reflectance, without an irradiance sensor. One panel gives `ρ = K·DN`, two or more panels fit `ρ = m·DN + b`. Calibration and survey images need the same exposure and gain.
 
-## Field protocol (short)
+## The Python version
 
-- 3 targets of clearly different temperature, each at least 10 to 15 px wide in the calibration shot (fly lower for that shot, or hold the drone over the panels as in the screenshots).
-- Measure every target with the IR gun within a minute of the drone shot; write the readings down with the time. Note the gun's emissivity setting.
-- Repeat at the end of the flight if drift matters (long flights, changing weather). A second shot taken mid-flight still helps: images after it get its coefficients, and the pre-flight check says how many images that affects.
-- Keep the camera's clock right; capture times drive the interpolation.
+The tool started as a Python program (`thermal_calibration_tool.py`) with the same method and the same three steps. It stays the reference: the test data and the method tests come from it, and the app matches its results to better than 1e-5. Use it for the command line or to work on the method.
 
-## Tests and test data
+Download the code (green *Code* button → *Download ZIP*), unpack it and double-click `Launch.bat` (Windows), `Launch.command` (macOS, the first time right-click → *Open*) or `Launch.sh` (Linux). The first start installs what is missing into a private `.venv` folder, which takes a few minutes. You need Python 3.10 or newer from [python.org](https://www.python.org/downloads/). On Windows tick *Add python.exe to PATH*, and on Linux install `python3-tk` and `python3-venv` as well.
+
+Without the launcher, and without a window:
 
 ```bash
-python -m pytest tests -q                       # closed-form checks, properties, golden data, I/O, GUI
-python tests/make_synthetic_flight.py           # synthetic M4T-like flight with known drift
-python demo/make_demo_flight.py demo/flight    # the demo flight the README screenshots are made from
-python tests/screenshot_gui.py --config demo/flight/screenshot_config.json   # drives the real GUI, captures them
+pip install -r requirements.txt
+python thermal_calibration_tool.py                                    # the window
+python thermal_calibration_tool.py --project flight.calib.json --run  # a saved project, no window
+python thermal_calibration_tool.py --project flight.calib.json --run --survey /data/flight2 --output /data/flight2/calibrated
 ```
 
-See `tests/README.md` for what the suite guarantees, the golden data, the synthetic flight generator, the DJI SDK conversion of real R-JPEGs and the screenshot driver. CI runs the suite on Ubuntu (with a virtual display) and Windows.
+The repository used to be at `github.com/MoritzNelle/GUI-Software-to-calibrate-Thermal-Images-with-Calibration-Targets`, and that address forwards here. Its history was rebuilt for the move, so a copy cloned before November 2026 cannot be updated with `git pull`. Clone it again.
 
-## Mathematical background
+## Tests
 
-Empirical line: `T_corrected = m × T_drone + b`, with `T_drone` the mean of the inner region of each target polygon (edge inset in pixels) and `T_ref` the reference reading; m and b by ordinary least squares.
-
-Temporal interpolation across calibration events at times t₀ < t₁ < … : `m(t)`, `b(t)` piecewise linear between consecutive events, clamped to the first/last values outside the window.
+`python -m pytest tests -q` checks the method against closed-form results and golden data, and tests file handling and the window. `tests/README.md` says what the suite covers, and `rust/README.md` describes the app's own tests. CI runs both on Linux, Windows and macOS.
 
 ## Further reading
-
-Background on why uncooled thermal cameras need field calibration and how the empirical line method is used for it:
 
 - Kelly, J. et al. (2019). *Challenges and Best Practices for Deriving Temperature Data from an Uncalibrated UAV Thermal Infrared Camera.* Remote Sensing.
 - Han, Y. et al. (2020). *Field-Based Calibration of Unmanned Aerial Vehicle Thermal Infrared Imagery with Temperature-Controlled References.* Sensors.
 
-## Desktop app (Rust)
+## Problems, citation, license
 
-The desktop app in [`rust/`](rust/README.md) is a port of this tool to Rust with a Tauri shell. Its engine
-reproduces this tool's golden flight to better than 1e-5, and its command line (`thermal-calibration
---project FILE`) writes the same outputs. The app has the same three steps, plus undo/redo and an Inspect
-view for checking the calibrated images. Installers are on the releases page (see [Installation](#installation)).
-The Python tool stays the reference: the golden data and the method tests come from it.
+Please report problems in the [issue tracker](https://github.com/haystack-imaging/thermal-calibration-tool/issues). The bug template asks for `processing_log.csv` and, if you can, one calibration image. `CONTRIBUTING.md` has the development setup and `CHANGELOG.md` the changes.
 
-## Reporting problems and contributing
-
-Please use the [issue tracker](https://github.com/haystack-imaging/thermal-calibration-tool/issues); the bug template asks for the `processing_log.csv` and, if possible, one calibration image, so the problem can be reproduced. See `CONTRIBUTING.md` for the development setup and the rules for changes to the method. Changes are listed in `CHANGELOG.md`.
-
-## How to cite
-
-If the tool contributes to a publication, please cite it. `CITATION.cff` holds the metadata (GitHub shows a "Cite this repository" button from it):
+If the tool helps a publication, please cite it (GitHub's *Cite this repository* button uses `CITATION.cff`):
 
 > Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.3.0) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
-A versioned DOI (Zenodo) will be added once the repository is archived there.
-
-## Author and license
-
-Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle). Questions and problems go to the issue tracker; the company can be reached through its website.
-
-GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK, needed to convert R-JPEGs, is DJI's and is not part of this repository.
+Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle). GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK is DJI's and not part of this repository.

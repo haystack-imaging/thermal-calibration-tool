@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The desktop app has the demo flight built in: *Open* → *Open demo flight*, or the button in step 1
+  while no images are loaded. It is a smaller version of the synthetic flight (two calibration shots,
+  14 survey images) with the panels drawn and the readings typed in. The app copies it into its data
+  folder the first time, so a run can write its outputs next to the images.
+- Every release has the same flight as `demo-flight.zip`, for the Python version or to look at the files.
+- `demo/make_demo_flight.py --every N` keeps every Nth survey image, and the flight folder gets a short
+  `README.txt`.
+
+### Changed
+- Project files also store the survey and output folders relative to the project file
+  (`folder_relative`, `output_folder_relative`), in the app and in the Python tool. A flight folder that
+  moves as a whole, like the demo, opens with its folders. The demo project uses relative paths only,
+  and its outputs go into `calibrated/` next to `survey/`.
+- The README is less than half as long. It starts with the app and the demo flight, and the Python
+  version has its own section.
+- The release workflow tests the packaged apps: it starts the AppImage, the app inside its macOS bundle
+  and the Windows app after a silent install, and opens the demo flight in each.
+
 ## [0.3.0] - 2026-11-24
 
 The desktop app gets installers for Windows, macOS and Linux, so it can be used without Python. The Python
