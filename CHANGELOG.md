@@ -6,7 +6,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
-- The README credits the collaboration with the PANGEOS COST Action (CA22136).
+- The README credits the collaboration with the PANGEOS COST Action (CA22136) and shows the PANGEOS and COST
+  logos (not covered by the GPL).
 
 ## [0.3.1] - 2026-11-24
 

@@ -119,3 +119,11 @@ If the tool helps a publication, please cite it (GitHub's *Cite this repository*
 > Nelle, M. (2026). *Thermal Image Calibration Tool: Empirical Line calibration of drone thermal images with field targets* (version 0.3.1) [Software]. Haystack Imaging. https://github.com/haystack-imaging/thermal-calibration-tool
 
 Developed and maintained by [Haystack Imaging](https://haystackimaging.eu) (Moritz Nelle), in collaboration with the [PANGEOS COST Action (CA22136)](https://pangeos.eu/). GNU General Public License, version 3 (GPL-3.0-only), see `LICENSE`. Copyright 2026 Moritz Nelle. The DJI Thermal SDK is DJI's and not part of this repository.
+
+<p>
+  <a href="https://pangeos.eu/"><img src="docs/logos/pangeos.png" alt="PANGEOS, COST Action CA22136" height="40"></a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://www.cost.eu/"><img src="docs/logos/cost.png" alt="COST, European Cooperation in Science and Technology" height="64"></a>
+</p>
+
+The PANGEOS and COST logos belong to their owners and are not covered by the GPL.
