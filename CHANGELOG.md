@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The README credits the collaboration with the PANGEOS COST Action (CA22136).
+
 ## [0.3.1] - 2026-11-24
 
 The demo flight comes with the app now, so trying the tool needs no Python and no drone.
